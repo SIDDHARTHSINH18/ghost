@@ -1,0 +1,21 @@
+# Gradio UI
+gradio>=6.0,<7.0
+
+# Hugging Face model runtime
+transformers>=4.46,<5.0
+accelerate>=0.34
+safetensors>=0.4
+
+# Image handling
+Pillow>=10.0
+
+# PDF text extraction
+pdfplumber>=0.11
+
+# PyTorch
+#
+# Install the appropriate PyTorch build separately depending
+# on whether you have CPU-only or NVIDIA CUDA hardware.
+#
+# CPU example:
+# pip install torch

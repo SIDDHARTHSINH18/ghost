@@ -1,0 +1,57 @@
+{
+  "default_model": "deepseek-chat",
+
+  "system_prompt": "You are a helpful AI assistant. Answer accurately and clearly.",
+
+  "models": [
+    {
+      "name": "deepseek-coder-v2",
+      "endpoint": "deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct",
+      "capabilities": [
+        "coding",
+        "analysis",
+        "chat"
+      ],
+      "context_length": 8192,
+      "max_new_tokens": 512,
+      "temperature": 0.7,
+      "top_p": 0.95,
+      "repetition_penalty": 1.1,
+      "trust_remote_code": true,
+      "api_type": "local_transformers"
+    },
+
+    {
+      "name": "deepseek-chat",
+      "endpoint": "deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
+      "capabilities": [
+        "chat",
+        "instruction-following",
+        "reasoning"
+      ],
+      "context_length": 8192,
+      "max_new_tokens": 512,
+      "temperature": 0.7,
+      "top_p": 0.95,
+      "repetition_penalty": 1.1,
+      "trust_remote_code": false,
+      "api_type": "local_transformers"
+    },
+
+    {
+      "name": "mistral-7b",
+      "endpoint": "mistralai/Mistral-7B-Instruct-v0.2",
+      "capabilities": [
+        "chat",
+        "general-purpose"
+      ],
+      "context_length": 8192,
+      "max_new_tokens": 512,
+      "temperature": 0.7,
+      "top_p": 0.95,
+      "repetition_penalty": 1.1,
+      "trust_remote_code": false,
+      "api_type": "local_transformers"
+    }
+  ]
+}
