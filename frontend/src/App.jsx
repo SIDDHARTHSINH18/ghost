@@ -1,89 +1,205 @@
 import { useState } from "react";
+import ChatWindow from "./components/ChatWindow";
+import ChatInput from "./components/ChatInput";
 
 function App() {
   const [message, setMessage] = useState("");
-  const [response, setResponse] = useState("");
+  const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [documentId, setDocumentId] = useState(null);
 
   const sendMessage = async () => {
-    if (!message.trim()) return;
+    if (!message.trim() || loading) return;
 
+    const userMessage = message.trim();
+
+    setMessages((prev) => [
+      ...prev,
+      { role: "user", content: userMessage },
+    ]);
+
+    setMessage("");
     setLoading(true);
-    setResponse("");
 
     try {
-      const res = await fetch("http://127.0.0.1:8000/api/chat", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          message: message,
-          provider: "nemotron",
-          model: null,
-        }),
-      });
-
-      const data = await res.json();
+      const res = await fetch(
+        "http://127.0.0.1:8000/api/chat",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            message: userMessage,
+            provider: "nemotron",
+            model: null,
+            document_id: documentId,
+          }),
+        }
+      );
 
       if (!res.ok) {
-        throw new Error(data.detail || "AI request failed");
+        const errorText = await res.text();
+        throw new Error(errorText || "AI request failed");
       }
 
-      setResponse(data.response);
-    } catch (error) {
-      setResponse(`❌ Error: ${error.message}`);
-    }
+      if (!res.body) {
+        throw new Error(
+          "Streaming is not supported by this response"
+        );
+      }
 
-    setLoading(false);
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+
+      let assistantResponse = "";
+      let sourcePages = [];
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: "",
+          pages: [],
+        },
+      ]);
+
+      while (true) {
+        const { value, done } = await reader.read();
+
+        if (done) break;
+
+        const chunk = decoder.decode(value, {
+          stream: true,
+        });
+
+        // Check for page metadata
+        if (chunk.includes("__SOURCES__:")) {
+          const sourceMatch = chunk.match(
+            /__SOURCES__:([0-9,]+)\n?/
+          );
+
+          if (sourceMatch) {
+            sourcePages = sourceMatch[1]
+              .split(",")
+              .map((page) => page.trim())
+              .filter(Boolean);
+
+            // Remove the internal metadata from the AI response
+            const cleanChunk = chunk.replace(
+              /__SOURCES__:[0-9,]+\n?/,
+              ""
+            );
+
+            assistantResponse += cleanChunk;
+          }
+        } else {
+          assistantResponse += chunk;
+        }
+
+        setMessages((prev) => {
+          const updated = [...prev];
+
+          updated[updated.length - 1] = {
+            role: "assistant",
+            content: assistantResponse,
+            pages: sourcePages,
+          };
+
+          return updated;
+        });
+      }
+    } catch (error) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: `❌ Error: ${error.message}`,
+          pages: [],
+        },
+      ]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const newChat = () => {
+    if (loading) return;
+
+    setMessages([]);
+    setMessage("");
+    setDocumentId(null);
   };
 
   return (
     <div style={styles.page}>
       <div style={styles.container}>
-        <h1>AI Orchestrator</h1>
 
-        <p style={styles.subtitle}>
-          Multi-provider AI assistant
-        </p>
+        <div style={styles.header}>
+          <div>
+            <h1 style={styles.title}>
+              AI Orchestrator
+            </h1>
 
-        <div style={styles.chatBox}>
-          {response ? (
-            <pre style={styles.response}>{response}</pre>
-          ) : (
-            <p style={styles.placeholder}>
-              Ask your AI Orchestrator something...
+            <p style={styles.subtitle}>
+              Multi-provider AI assistant
             </p>
-          )}
-        </div>
-
-        <div style={styles.inputRow}>
-          <input
-            type="text"
-            placeholder="Type your message..."
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                sendMessage();
-              }
-            }}
-            style={styles.input}
-          />
+          </div>
 
           <button
-            onClick={sendMessage}
+            onClick={newChat}
             disabled={loading}
-            style={styles.button}
+            style={{
+              ...styles.newChatButton,
+              opacity: loading ? 0.5 : 1,
+              cursor: loading
+                ? "not-allowed"
+                : "pointer",
+            }}
           >
-            {loading ? "..." : "Send"}
+            + New Chat
           </button>
         </div>
 
+        <ChatWindow
+          messages={messages}
+          loading={loading}
+        />
+
+        <ChatInput
+          message={message}
+          setMessage={setMessage}
+          sendMessage={sendMessage}
+          loading={loading}
+          setDocumentId={setDocumentId}
+        />
+
         <div style={styles.status}>
           <span style={styles.dot}></span>
-          Backend: http://127.0.0.1:8000
+
+          <span>Nemotron</span>
+
+          <span style={styles.separator}>•</span>
+
+          <span>Streaming</span>
+
+          <span style={styles.separator}>•</span>
+
+          <span>Backend connected</span>
+
+          {documentId && (
+            <>
+              <span style={styles.separator}>
+                •
+              </span>
+
+              <span>
+                📄 Document indexed
+              </span>
+            </>
+          )}
         </div>
+
       </div>
     </div>
   );
@@ -107,60 +223,40 @@ const styles = {
     maxWidth: "900px",
   },
 
+  header: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: "20px",
+  },
+
+  title: {
+    margin: 0,
+    fontSize: "32px",
+  },
+
   subtitle: {
     color: "#9ca3af",
-    marginBottom: "30px",
+    margin: "8px 0 0",
   },
 
-  chatBox: {
-    minHeight: "400px",
-    background: "#171a23",
-    border: "1px solid #2a2f3a",
-    borderRadius: "16px",
-    padding: "25px",
-    marginBottom: "15px",
-  },
-
-  placeholder: {
-    color: "#6b7280",
-  },
-
-  response: {
-    whiteSpace: "pre-wrap",
-    fontFamily: "Arial, sans-serif",
-    fontSize: "16px",
-  },
-
-  inputRow: {
-    display: "flex",
-    gap: "10px",
-  },
-
-  input: {
-    flex: 1,
-    padding: "15px",
-    borderRadius: "10px",
-    border: "1px solid #333",
-    background: "#171a23",
+  newChatButton: {
+    background: "#1f2937",
     color: "white",
-    fontSize: "16px",
-    outline: "none",
-  },
-
-  button: {
-    padding: "15px 25px",
+    border: "1px solid #374151",
     borderRadius: "10px",
-    border: "none",
-    background: "#6366f1",
-    color: "white",
-    fontSize: "16px",
-    cursor: "pointer",
+    padding: "10px 16px",
+    fontSize: "14px",
+    transition: "0.2s",
   },
 
   status: {
-    marginTop: "20px",
+    marginTop: "16px",
     color: "#9ca3af",
     fontSize: "14px",
+    display: "flex",
+    alignItems: "center",
+    gap: "7px",
   },
 
   dot: {
@@ -169,7 +265,10 @@ const styles = {
     height: "8px",
     background: "#22c55e",
     borderRadius: "50%",
-    marginRight: "8px",
+  },
+
+  separator: {
+    color: "#4b5563",
   },
 };
 
