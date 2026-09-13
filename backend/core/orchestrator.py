@@ -1,14 +1,14 @@
-
+﻿
 """
-FRIDAY Orchestrator
+GHOST Orchestrator
 -------------------
 
-The central brain of FRIDAY.
+The central brain of GHOST.
 
 Responsibilities:
 - Manage AI model providers
 - Select the requested/default provider
-- Build FRIDAY's system context
+- Build GHOST's system context
 - Accept conversation memory
 - Accept document/RAG context
 - Send the final context to the model
@@ -24,7 +24,7 @@ from typing import Any, Dict, List, Optional
 
 class Orchestrator:
     """
-    Central FRIDAY intelligence/orchestration layer.
+    Central GHOST intelligence/orchestration layer.
     """
 
     def __init__(
@@ -34,7 +34,7 @@ class Orchestrator:
         self.providers: Dict[str, Any] = {}
         self.default_provider = default_provider
 
-        # Future FRIDAY components
+        # Future GHOST components
         self.memory = None
         self.retriever = None
         self.tools: Dict[str, Any] = {}
@@ -63,7 +63,7 @@ class Orchestrator:
         """
         Return a provider.
 
-        If no provider is specified, use FRIDAY's default provider.
+        If no provider is specified, use GHOST's default provider.
         """
         provider_name = name or self.default_provider
 
@@ -73,7 +73,7 @@ class Orchestrator:
             available = ", ".join(self.providers.keys())
 
             raise ValueError(
-                f"FRIDAY provider '{provider_name}' is not registered. "
+                f"GHOST provider '{provider_name}' is not registered. "
                 f"Available providers: {available or 'none'}"
             )
 
@@ -81,7 +81,7 @@ class Orchestrator:
 
     def set_default_provider(self, name: str) -> None:
         """
-        Change FRIDAY's default model provider.
+        Change GHOST's default model provider.
         """
         if name not in self.providers:
             raise ValueError(
@@ -98,20 +98,20 @@ class Orchestrator:
         return list(self.providers.keys())
 
     # ============================================================
-    # FRIDAY SYSTEM IDENTITY
+    # GHOST SYSTEM IDENTITY
     # ============================================================
     def build_system_prompt(self) -> str:
         return """
-You are FRIDAY, the user's personal AI operating system.
+You are GHOST, the user's personal AI operating system.
 
 IDENTITY
-You are FRIDAY.
+You are GHOST.
 You are not ChatGPT.
 You are not NVIDIA's assistant.
 Do not describe yourself as "a language model developed by NVIDIA"
 unless the user explicitly asks which underlying model/provider is being used.
 
-Your job is to assist the user through the FRIDAY system.
+Your job is to assist the user through the GHOST system.
 
 IMPORTANT CONTEXT RULE
 The conversation context provided to you may contain retrieved long-term
@@ -132,7 +132,7 @@ retrieved user memory and conversation context.
 
 For example, if retrieved memory says:
 
-[project] Remember that my project is called FRIDAY.
+[project] Remember that my project is called GHOST.
 
 and the user asks:
 
@@ -140,7 +140,7 @@ and the user asks:
 
 the correct answer is:
 
-"Your project is called FRIDAY."
+"Your project is called GHOST."
 
 Do not answer with information about your underlying AI model instead.
 
@@ -171,7 +171,7 @@ Never expose credentials or secrets.
 Never perform sensitive or irreversible actions without authorization.
 Prefer safe and reversible operations.
 
-You are FRIDAY.
+You are GHOST.
 """.strip()
     # ============================================================
     # CONTEXT BUILDING
@@ -256,7 +256,7 @@ CURRENT USER REQUEST:
         **kwargs,
     ) -> str:
         """
-        Main FRIDAY generation method.
+        Main GHOST generation method.
 
         The rest of the application should eventually call this
         method rather than talking directly to Nemotron.
@@ -280,7 +280,7 @@ CURRENT USER REQUEST:
         # Different providers may expose slightly different
         # generate() signatures.
         #
-        # We first try the full FRIDAY interface.
+        # We first try the full GHOST interface.
         # If the provider only accepts a simpler interface,
         # fall back safely.
         # --------------------------------------------------------
@@ -315,7 +315,7 @@ CURRENT USER REQUEST:
 
         if result is None:
             raise RuntimeError(
-                "FRIDAY received an empty response from the model."
+                "GHOST received an empty response from the model."
             )
 
         if isinstance(result, str):
@@ -364,11 +364,11 @@ CURRENT USER REQUEST:
         **kwargs,
     ) -> str:
         """
-        Public chat interface for the FRIDAY API.
+        Public chat interface for the GHOST API.
         """
 
         if not message or not message.strip():
-            raise ValueError("FRIDAY received an empty message.")
+            raise ValueError("GHOST received an empty message.")
 
         return await self.generate(
             message=message.strip(),
@@ -381,3 +381,5 @@ CURRENT USER REQUEST:
         )
 
     # ===========================================
+
+

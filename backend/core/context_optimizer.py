@@ -1,4 +1,4 @@
-from typing import List, Dict
+﻿from typing import List, Dict
 
 
 class ContextOptimizer:
@@ -126,3 +126,4 @@ class ContextOptimizer:
         return "\n\n".join(
             context_parts
         )
+

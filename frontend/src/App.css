@@ -705,3 +705,227 @@ button {
     display: none;
   }
 }
+
+/* ============================================================
+   GHOST COMMAND CENTER — v0.2 UI OVERRIDES
+   ============================================================ */
+
+.friday-app {
+  background:
+    radial-gradient(circle at 50% 46%, rgba(255,255,255,.035), transparent 20%),
+    radial-gradient(circle at 50% 46%, rgba(0,255,170,.025), transparent 42%),
+    #000;
+}
+
+.brand-title {
+  font-size: 18px;
+  letter-spacing: 6px;
+  text-shadow: 0 0 18px rgba(255,255,255,.25);
+}
+
+.brand-subtitle {
+  font-size: 9px;
+  color: #777;
+  letter-spacing: 3px;
+}
+
+.top-status {
+  font-size: 9px;
+  color: #888;
+  letter-spacing: 2px;
+}
+
+.graph-layer {
+  opacity: .92;
+}
+
+/* Fixed GHOST Core */
+.ghost-core {
+  position: absolute;
+  left: 50%;
+  top: 43%;
+  width: 190px;
+  height: 190px;
+  transform: translate(-50%, -50%);
+  z-index: 8;
+  pointer-events: none;
+  display: grid;
+  place-items: center;
+  filter: drop-shadow(0 0 24px rgba(255,255,255,.12));
+}
+
+.ghost-core-ring {
+  width: 118px;
+  height: 118px;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,.55);
+  display: grid;
+  place-items: center;
+  box-shadow:
+    0 0 16px rgba(255,255,255,.14),
+    inset 0 0 22px rgba(255,255,255,.08);
+  animation: ghostCorePulse 2.8s ease-in-out infinite;
+}
+
+.ghost-core-inner {
+  width: 78px;
+  height: 78px;
+  border-radius: 50%;
+  border: 2px solid rgba(25,245,139,.75);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle, rgba(25,245,139,.12), rgba(0,0,0,.92) 66%);
+  box-shadow: 0 0 35px rgba(25,245,139,.18);
+}
+
+.ghost-core-mark {
+  font-size: 29px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  color: #fff;
+  text-shadow: 0 0 18px rgba(25,245,139,.55);
+}
+
+.ghost-core-state {
+  margin-top: 3px;
+  font-size: 7px;
+  letter-spacing: 2px;
+  color: #19f58b;
+}
+
+.ghost-core-label {
+  position: absolute;
+  bottom: -8px;
+  font-size: 7px;
+  letter-spacing: 3px;
+  color: #555;
+}
+
+.ghost-core-orbit {
+  position: absolute;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 50%;
+}
+
+.ghost-core-orbit-a {
+  width: 164px;
+  height: 74px;
+  transform: rotate(28deg);
+}
+
+.ghost-core-orbit-b {
+  width: 170px;
+  height: 82px;
+  transform: rotate(-32deg);
+}
+
+.ghost-core-thinking .ghost-core-ring {
+  animation-duration: .85s;
+  border-color: rgba(25,245,139,.9);
+}
+
+.response-panel {
+  width: min(760px, 72vw);
+  max-height: 390px;
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: 14px;
+  background: rgba(4,6,8,.94);
+  box-shadow: 0 24px 100px rgba(0,0,0,.82);
+}
+
+.response-header {
+  padding: 14px 20px;
+  font-size: 9px;
+  color: #aaa;
+}
+
+.response-body {
+  padding: 20px 22px;
+}
+
+.chat-message {
+  margin-bottom: 22px;
+  color: #e4e7e8;
+  font-size: 15px;
+  line-height: 1.72;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chat-message.user {
+  color: #aeb5b8;
+}
+
+.message-role {
+  margin-bottom: 8px;
+  font-size: 9px;
+  letter-spacing: 2.5px;
+  color: #777;
+}
+
+.chat-message.assistant .message-role {
+  color: #19f58b;
+}
+
+.source-pages {
+  margin-top: 11px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(25,245,139,.12);
+  color: #19a96f;
+  font-size: 10px;
+  letter-spacing: 1px;
+}
+
+.command-area {
+  width: min(720px, calc(100vw - 32px));
+}
+
+.command-bar {
+  height: 56px;
+  border-radius: 12px;
+  background: rgba(4,6,8,.96);
+  border-color: rgba(255,255,255,.16);
+}
+
+.command-bar textarea {
+  font-size: 14px;
+  color: #eee;
+}
+
+.command-bar textarea::placeholder {
+  color: #666;
+}
+
+.ready-label {
+  font-size: 9px;
+  letter-spacing: 3px;
+  color: #19a96f;
+}
+
+.legend-item {
+  font-size: 9px;
+}
+
+@keyframes ghostCorePulse {
+  0%, 100% { transform: scale(.96); opacity: .82; }
+  50% { transform: scale(1.04); opacity: 1; }
+}
+
+@media (max-width: 700px) {
+  .ghost-core {
+    top: 35%;
+    transform: translate(-50%, -50%) scale(.72);
+  }
+
+  .response-panel {
+    width: calc(100vw - 18px);
+    max-height: 330px;
+    bottom: 128px;
+  }
+
+  .chat-message {
+    font-size: 14px;
+  }
+}

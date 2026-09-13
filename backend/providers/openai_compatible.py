@@ -1,4 +1,4 @@
-import json
+﻿import json
 import httpx
 
 from providers.base import AIProvider
@@ -94,3 +94,4 @@ class OpenAICompatibleProvider(AIProvider):
 
     async def health_check(self):
         return bool(self.api_key)
+

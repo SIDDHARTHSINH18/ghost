@@ -1,4 +1,4 @@
-import asyncio
+﻿import asyncio
 from typing import List, Dict
 
 
@@ -411,3 +411,4 @@ class DocumentSummarizer:
         )
 
         return final_summary
+

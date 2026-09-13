@@ -1,4 +1,4 @@
-import re
+﻿import re
 from typing import List, Dict
 
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -338,3 +338,4 @@ class DocumentRetriever:
         )
 
         return selected
+

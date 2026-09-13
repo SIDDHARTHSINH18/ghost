@@ -1,4 +1,4 @@
-from typing import List, Dict
+﻿from typing import List, Dict
 
 
 class DocumentProcessor:
@@ -47,3 +47,4 @@ class DocumentProcessor:
             start = end - self.chunk_overlap
 
         return chunks
+

@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+﻿from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.chat import router as chat_router
@@ -41,3 +41,4 @@ def health():
 app.include_router(chat_router)
 app.include_router(upload_router)
 app.include_router(graph_router)
+

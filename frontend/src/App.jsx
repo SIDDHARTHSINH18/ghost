@@ -15,7 +15,7 @@ const API_URL =
 
 
 const NODE_COLORS = {
-  friday: "#ffffff",
+  ghost: "#ffffff",
   document: "#19f58b",
   memory: "#3b82ff",
   project: "#a855f7",
@@ -25,7 +25,7 @@ const NODE_COLORS = {
 
 
 const NODE_LABELS = {
-  friday: "FRIDAY",
+  ghost: "GHOST",
   document: "Documents",
   memory: "Memory",
   project: "Projects",
@@ -62,9 +62,11 @@ function App() {
   const [backendOnline, setBackendOnline] =
     useState(false);
 
+  const ghostState = loading ? "THINKING" : "READY";
+
 
   // ============================================================
-  // LOAD REAL FRIDAY GRAPH
+  // LOAD REAL GHOST GRAPH
   // ============================================================
 
   useEffect(() => {
@@ -117,7 +119,7 @@ function App() {
     } catch (error) {
 
       console.error(
-        "FRIDAY graph error:",
+        "GHOST graph error:",
         error
       );
 
@@ -216,13 +218,13 @@ function App() {
       const errorText = await response.text();
 
       throw new Error(
-        errorText || "FRIDAY request failed"
+        errorText || "GHOST request failed"
       );
     }
 
     if (!response.body) {
       throw new Error(
-        "FRIDAY returned no response body."
+        "GHOST returned no response body."
       );
     }
 
@@ -367,14 +369,14 @@ function App() {
       return updated;
     });
 
-    // Refresh the FRIDAY knowledge graph
+    // Refresh the GHOST knowledge graph
     setTimeout(() => {
       loadGraph();
     }, 500);
 
   } catch (error) {
     console.error(
-      "FRIDAY chat error:",
+      "GHOST chat error:",
       error
     );
 
@@ -401,7 +403,7 @@ function App() {
         updated[assistantIndex] = {
           ...updated[assistantIndex],
           content:
-            `FRIDAY ERROR: ${error.message}`,
+            `GHOST ERROR: ${error.message}`,
           pages: [],
         };
       }
@@ -467,27 +469,27 @@ function App() {
 
 
   // ============================================================
-  // FOCUS FRIDAY
+  // FOCUS GHOST
   // ============================================================
 
   const focusFriday =
     () => {
 
-      const friday =
+      const ghost =
         visualGraph.nodes.find(
           (node) =>
             node.id ===
-            "friday"
+            "ghost"
         );
 
       if (
-        friday &&
+        ghost &&
         graphRef.current
       ) {
 
         graphRef.current.centerAt(
-          friday.x,
-          friday.y,
+          ghost.x,
+          ghost.y,
           800
         );
 
@@ -505,7 +507,7 @@ function App() {
 
   return (
 
-    <div className="friday-app">
+    <div className="ghost-app">
 
       {/* ======================================================
           TOP LEFT BRAND
@@ -514,7 +516,7 @@ function App() {
       <div className="brand">
 
         <div className="brand-title">
-          FRIDAY
+          GHOST
         </div>
 
         <div className="brand-subtitle">
@@ -559,6 +561,18 @@ function App() {
           KNOWLEDGE GRAPH
       ====================================================== */}
 
+      <div className={`ghost-core ghost-core-${ghostState.toLowerCase()}`} aria-hidden="true">
+        <div className="ghost-core-orbit ghost-core-orbit-a" />
+        <div className="ghost-core-orbit ghost-core-orbit-b" />
+        <div className="ghost-core-ring">
+          <div className="ghost-core-inner">
+            <span className="ghost-core-mark">G</span>
+            <span className="ghost-core-state">{ghostState}</span>
+          </div>
+        </div>
+        <div className="ghost-core-label">GHOST CORE</div>
+      </div>
+
       <div className="graph-layer">
 
         {visualGraph.nodes.length > 0 ? (
@@ -578,7 +592,7 @@ function App() {
             nodeRelSize={4}
 
             nodeVal={(node) =>
-              node.type === "friday"
+              node.type === "ghost"
                 ? 5
                 : node.isRoot
                 ? 3
@@ -605,11 +619,13 @@ function App() {
               0
             }
 
-            d3AlphaDecay={0.035}
+            d3AlphaDecay={1}
 
-            d3VelocityDecay={0.3}
+            d3VelocityDecay={1}
 
-            cooldownTicks={80}
+            cooldownTicks={0}
+
+            enableNodeDrag={true}
 
             onNodeClick={
               handleNodeClick
@@ -628,7 +644,7 @@ function App() {
 
 
               const radius =
-                node.type === "friday"
+                node.type === "ghost"
                   ? 7
                   : node.isRoot
                   ? 5
@@ -712,7 +728,7 @@ function App() {
         ) : (
 
           <div className="graph-loading">
-            CONNECTING TO FRIDAY...
+            CONNECTING TO GHOST...
           </div>
 
         )}
@@ -731,7 +747,7 @@ function App() {
         )
           .filter(
             ([type]) =>
-              type !== "friday"
+              type !== "ghost"
           )
           .map(
             ([type, label]) => (
@@ -899,7 +915,7 @@ function App() {
           <div className="response-header">
 
             <span>
-              FRIDAY
+              GHOST
             </span>
 
             <button
@@ -933,7 +949,7 @@ function App() {
                     {item.role ===
                     "user"
                       ? "YOU"
-                      : "FRIDAY"}
+                      : "GHOST"}
 
                   </div>
 
@@ -979,8 +995,8 @@ function App() {
         <div className="ready-label">
 
           {loading
-            ? "FRIDAY IS THINKING..."
-            : "FRIDAY IS READY"}
+            ? "GHOST IS THINKING..."
+            : "GHOST IS READY"}
 
         </div>
 
@@ -990,7 +1006,7 @@ function App() {
           <button
             className="command-icon"
             onClick={focusFriday}
-            title="Center FRIDAY"
+            title="Center GHOST"
           >
             ◉
           </button>
@@ -1006,7 +1022,7 @@ function App() {
             onKeyDown={
               handleKeyDown
             }
-            placeholder="Ask FRIDAY..."
+            placeholder="Ask GHOST..."
             disabled={loading}
             rows={1}
           />
@@ -1069,7 +1085,7 @@ function App() {
                 visualGraph.nodes.find(
                   (node) =>
                     node.id ===
-                    "project-friday"
+                    "project-ghost"
                 )
               )
             }
@@ -1109,7 +1125,7 @@ function App() {
 
       <div className="version">
 
-        FRIDAY CORE v0.1
+        GHOST CORE v0.1
 
       </div>
 

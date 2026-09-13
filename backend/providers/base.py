@@ -1,4 +1,4 @@
-from abc import ABC, abstractmethod
+﻿from abc import ABC, abstractmethod
 
 
 class AIProvider(ABC):
@@ -16,3 +16,4 @@ class AIProvider(ABC):
         Check whether the provider is available.
         """
         pass
+

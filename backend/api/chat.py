@@ -1,4 +1,4 @@
-import os
+﻿import os
 
 from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException
@@ -33,7 +33,7 @@ router = APIRouter(
 
 
 # ============================================================
-# FRIDAY ORCHESTRATOR
+# GHOST ORCHESTRATOR
 # ============================================================
 
 orchestrator = Orchestrator()
@@ -300,9 +300,7 @@ def is_whole_document_request(message: str) -> bool:
 # ============================================================
 
 def get_memory_context(message: str) -> str:
-
     try:
-
         context = memory_service.build_context(
             message,
             limit=5
@@ -312,16 +310,14 @@ def get_memory_context(message: str) -> str:
             return context
 
     except Exception as error:
-
         print(
             f"Memory retrieval error: {error}"
         )
 
     return ""
 
-
 # ============================================================
-# SAVE CONVERSATION MEMORY
+# INTELLIGENT AUTOMATIC CONVERSATION MEMORY
 # ============================================================
 
 def save_conversation_memory(
@@ -330,108 +326,446 @@ def save_conversation_memory(
     document_id=None
 ):
     """
-    Save only useful user-provided information.
+    Automatically detect useful long-term information from the
+    user's message.
 
-    We intentionally do not blindly store the assistant's
-    response as permanent memory.
+    GHOST should remember durable information such as:
+    - project information
+    - technologies being used
+    - user preferences
+    - important requirements
+    - decisions
+    - goals
+    - explicit instructions
 
-    FRIDAY's generated responses can contain:
-    - generic AI disclaimers
-    - temporary reasoning
-    - incorrect assumptions
-    - repeated information
-
-    Permanent memory should primarily represent useful
-    information coming from the user or important project
-    context.
+    GHOST should NOT remember:
+    - normal questions
+    - temporary requests
+    - generic conversation
+    - assistant-generated information
+    - secrets or credentials
     """
 
     try:
 
-        user_text = user_message.strip()
+        user_text = (user_message or "").strip()
 
         if not user_text:
             return
 
         lower = user_text.lower()
 
-        # --------------------------------------------------
-        # Memory triggers
-        # --------------------------------------------------
+        # --------------------------------------------------------
+        # Ignore obvious temporary questions
+        # --------------------------------------------------------
 
-        memory_triggers = [
-            "remember",
-            "my name is",
-            "my project is",
-            "i prefer",
-            "i like",
-            "i don't like",
-            "i dont like",
-            "i use",
-            "i want",
-            "i need",
-            "we decided",
-            "keep in mind",
-            "from now on",
-            "going forward",
-        ]
-
-        should_remember = any(
-            trigger in lower
-            for trigger in memory_triggers
+        temporary_starts = (
+            "what is ",
+            "what are ",
+            "who is ",
+            "where is ",
+            "when is ",
+            "why is ",
+            "why are ",
+            "how is ",
+            "how do ",
+            "how can ",
+            "can you ",
+            "could you ",
+            "would you ",
+            "tell me ",
+            "explain ",
+            "show me ",
+            "give me ",
+            "is this ",
+            "are you "
         )
 
-        if not should_remember:
+        is_question = (
+            "?" in user_text
+            or lower.startswith(temporary_starts)
+        )
+
+        # Explicit memory commands override question detection.
+        explicit_memory = any(
+            trigger in lower
+            for trigger in [
+                "remember this",
+                "remember that",
+                "remember",
+                "keep in mind",
+                "from now on",
+                "going forward",
+                "don't forget"
+            ]
+        )
+
+        if is_question and not explicit_memory:
             return
 
-        # --------------------------------------------------
-        # Determine memory type
-        # --------------------------------------------------
+        # --------------------------------------------------------
+        # MEMORY CLASSIFICATION
+        # --------------------------------------------------------
 
-        memory_type = "user_fact"
+        memory_type = None
+        importance = 0.0
+        tags = []
 
-        if "project" in lower:
+        # --------------------------------------------------------
+        # PROJECT INFORMATION
+        # --------------------------------------------------------
+
+        project_patterns = [
+            "my project is",
+            "our project is",
+            "the project is",
+            "i am building",
+            "i'm building",
+            "we are building",
+            "we're building",
+            "i am making",
+            "i'm making",
+            "we are making",
+            "we're making",
+            "building a",
+            "building an"
+        ]
+
+        if any(pattern in lower for pattern in project_patterns):
+
             memory_type = "project"
+            importance = 0.95
+            tags.extend([
+                "project",
+                "long_term"
+            ])
 
-        elif (
-            "prefer" in lower
-            or "like" in lower
+        # --------------------------------------------------------
+        # TECHNOLOGY / STACK INFORMATION
+        # --------------------------------------------------------
+
+        technology_terms = [
+            "fastapi",
+            "react",
+            "python",
+            "javascript",
+            "typescript",
+            "node.js",
+            "nodejs",
+            "vite",
+            "gradio",
+            "nvidia",
+            "nemotron",
+            "openai",
+            "hugging face",
+            "huggingface",
+            "transformers",
+            "pytorch",
+            "tensorflow",
+            "postgres",
+            "postgresql",
+            "supabase",
+            "mongodb",
+            "docker",
+            "github",
+            "git",
+            "vercel",
+            "digitalocean",
+            "telegram"
+        ]
+
+        found_technologies = [
+            tech
+            for tech in technology_terms
+            if tech in lower
+        ]
+
+        technology_patterns = [
+            "i use",
+            "i'm using",
+            "i am using",
+            "we use",
+            "we're using",
+            "we are using",
+            "our stack",
+            "tech stack",
+            "technology stack",
+            "built with",
+            "using"
+        ]
+
+        if (
+            found_technologies
+            and any(pattern in lower for pattern in technology_patterns)
         ):
+
+            if memory_type is None:
+                memory_type = "project"
+
+            importance = max(importance, 0.90)
+
+            tags.extend([
+                "technology",
+                "stack"
+            ])
+
+        # --------------------------------------------------------
+        # USER PREFERENCES
+        # --------------------------------------------------------
+
+        preference_patterns = [
+            "i prefer",
+            "i like",
+            "i love",
+            "i don't like",
+            "i dont like",
+            "i hate",
+            "my preference",
+            "my preferred",
+            "i usually",
+            "i always want"
+        ]
+
+        if any(
+            pattern in lower
+            for pattern in preference_patterns
+        ):
+
             memory_type = "preference"
+            importance = max(importance, 0.85)
 
-        elif "decided" in lower:
+            tags.extend([
+                "preference",
+                "user"
+            ])
+
+        # --------------------------------------------------------
+        # USER REQUIREMENTS / INSTRUCTIONS
+        # --------------------------------------------------------
+
+        requirement_patterns = [
+            "i want",
+            "i need",
+            "it must",
+            "it should",
+            "must have",
+            "should always",
+            "never do",
+            "do not",
+            "don't",
+            "make sure",
+            "requirement",
+            "requirement is"
+        ]
+
+        if any(
+            pattern in lower
+            for pattern in requirement_patterns
+        ):
+
+            if memory_type is None:
+                memory_type = "requirement"
+
+            importance = max(importance, 0.85)
+
+            tags.extend([
+                "requirement",
+                "user_instruction"
+            ])
+
+        # --------------------------------------------------------
+        # DECISIONS
+        # --------------------------------------------------------
+
+        decision_patterns = [
+            "we decided",
+            "i decided",
+            "we chose",
+            "i chose",
+            "we will use",
+            "we're going with",
+            "we are going with",
+            "the decision is",
+            "let's use",
+            "lets use",
+            "from now on"
+        ]
+
+        if any(
+            pattern in lower
+            for pattern in decision_patterns
+        ):
+
             memory_type = "decision"
+            importance = max(importance, 0.90)
 
-        # --------------------------------------------------
-        # Metadata
-        # --------------------------------------------------
+            tags.extend([
+                "decision",
+                "project"
+            ])
 
-        metadata = {}
+        # --------------------------------------------------------
+        # GOALS / LONG-TERM INTENT
+        # --------------------------------------------------------
+
+        goal_patterns = [
+            "my goal is",
+            "our goal is",
+            "i want to build",
+            "i want to create",
+            "i am trying to build",
+            "i'm trying to build",
+            "i plan to",
+            "we plan to",
+            "long term",
+            "long-term",
+            "eventually i want"
+        ]
+
+        if any(
+            pattern in lower
+            for pattern in goal_patterns
+        ):
+
+            if memory_type is None:
+                memory_type = "goal"
+
+            importance = max(importance, 0.90)
+
+            tags.extend([
+                "goal",
+                "long_term"
+            ])
+
+        # --------------------------------------------------------
+        # EXPLICIT PERSONAL FACT
+        # --------------------------------------------------------
+
+        personal_patterns = [
+            "my name is",
+            "i am ",
+            "i'm ",
+            "i work as",
+            "i study",
+            "i live in",
+            "i am a",
+            "i'm a"
+        ]
+
+        if (
+            memory_type is None
+            and any(
+                pattern in lower
+                for pattern in personal_patterns
+            )
+        ):
+
+            memory_type = "user_fact"
+            importance = 0.80
+
+            tags.extend([
+                "user",
+                "fact"
+            ])
+
+        # --------------------------------------------------------
+        # EXPLICIT MEMORY REQUEST
+        # --------------------------------------------------------
+
+        if explicit_memory:
+
+            if memory_type is None:
+                memory_type = "user_fact"
+
+            importance = max(
+                importance,
+                0.95
+            )
+
+            tags.extend([
+                "explicit_memory"
+            ])
+
+        # --------------------------------------------------------
+        # IF NOTHING IMPORTANT WAS DETECTED
+        # --------------------------------------------------------
+
+        if memory_type is None:
+            return
+
+        # --------------------------------------------------------
+        # BASIC SECRET PROTECTION
+        # --------------------------------------------------------
+
+        sensitive_patterns = [
+            "password",
+            "api key",
+            "apikey",
+            "secret key",
+            "private key",
+            "access token",
+            "auth token",
+            "bearer token",
+            "credit card",
+            "cvv",
+            "otp"
+        ]
+
+        if any(
+            pattern in lower
+            for pattern in sensitive_patterns
+        ):
+
+            print(
+                "GHOST memory skipped: possible sensitive information."
+            )
+
+            return
+
+        # --------------------------------------------------------
+        # CLEAN TAGS
+        # --------------------------------------------------------
+
+        tags = list(dict.fromkeys(tags))
+
+        # --------------------------------------------------------
+        # METADATA
+        # --------------------------------------------------------
+
+        metadata = {
+            "automatic": True,
+            "source_type": "conversation"
+        }
 
         if document_id:
             metadata["document_id"] = document_id
 
-        # --------------------------------------------------
-        # Save
-        # --------------------------------------------------
+        if found_technologies:
+            metadata["technologies"] = found_technologies
+
+        # --------------------------------------------------------
+        # SAVE
+        # --------------------------------------------------------
 
         memory_service.add_memory(
             content=user_text,
             memory_type=memory_type,
-            importance=0.8,
+            importance=importance,
             source="user",
+            tags=tags,
             metadata=metadata
         )
 
         print(
-            "FRIDAY memory saved:"
-            f" [{memory_type}] {user_text[:100]}"
+            "GHOST automatic memory saved:"
+            f" [{memory_type}] "
+            f"{user_text[:150]}"
         )
 
     except Exception as error:
 
         print(
-            f"Memory save warning: {error}"
+            f"GHOST automatic memory warning: {error}"
         )
 
 
@@ -649,7 +983,7 @@ async def chat(request: ChatRequest):
 
                 memory_section = (
                     "\n\n"
-                    "RELEVANT FRIDAY MEMORY:\n"
+                    "RELEVANT GHOST MEMORY:\n"
                     "--------------------------------\n"
                     f"{memory_context}\n"
                     "--------------------------------\n"
@@ -663,7 +997,7 @@ async def chat(request: ChatRequest):
 
             user_content = (
 
-                "You are FRIDAY, the user's personal "
+                "You are GHOST, the user's personal "
                 "AI operating system.\n\n"
 
                 "The user has requested a whole-document "
@@ -835,7 +1169,7 @@ async def chat(request: ChatRequest):
 
                 memory_section = (
                     "\n\n"
-                    "RELEVANT FRIDAY MEMORY:\n"
+                    "RELEVANT GHOST MEMORY:\n"
                     "--------------------------------\n"
                     f"{memory_context}\n"
                     "--------------------------------\n"
@@ -851,7 +1185,7 @@ async def chat(request: ChatRequest):
 
             user_content = (
 
-                "You are FRIDAY, the user's personal "
+                "You are GHOST, the user's personal "
                 "AI operating system.\n\n"
 
                 "Answer the user's question using the "
@@ -881,7 +1215,7 @@ async def chat(request: ChatRequest):
                 "- Use the uploaded document as the "
                 "primary source of truth for document facts.\n"
 
-                "- Use FRIDAY memory only when it adds "
+                "- Use GHOST memory only when it adds "
                 "relevant continuity.\n\n"
 
                 f"USER QUESTION:\n{request.message}"
@@ -918,7 +1252,7 @@ async def chat(request: ChatRequest):
         if memory_context:
              user_content = (
 
-        "You are FRIDAY, the user's personal "
+        "You are GHOST, the user's personal "
         "AI operating system.\n\n"
 
         "You are NOT ChatGPT.\n"
@@ -959,10 +1293,10 @@ async def chat(request: ChatRequest):
 
         "EXAMPLE:\n"
 
-        "If memory says the user's project is FRIDAY and "
+        "If memory says the user's project is GHOST and "
         "the user asks \"What are we building?\", answer:\n"
 
-        "\"We're building FRIDAY — your personal AI "
+        "\"We're building GHOST â€” your personal AI "
         "operating system.\"\n\n"
 
         "RELEVANT LONG-TERM MEMORY:\n"
@@ -996,7 +1330,7 @@ async def chat(request: ChatRequest):
 
             user_content = (
 
-                "You are FRIDAY, the user's personal "
+                "You are GHOST, the user's personal "
                 "AI operating system.\n\n"
 
                 "You are NOT ChatGPT.\n"
@@ -1111,3 +1445,4 @@ async def chat(request: ChatRequest):
         generate_response(),
         media_type="text/plain"
     )
+

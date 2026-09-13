@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException
+﻿from fastapi import APIRouter, UploadFile, File, HTTPException
 from pypdf import PdfReader
 from io import BytesIO
 from docx import Document
@@ -189,3 +189,4 @@ async def upload_file(file: UploadFile = File(...)):
             status_code=500,
             detail=f"Could not process file: {str(error)}"
         )
+

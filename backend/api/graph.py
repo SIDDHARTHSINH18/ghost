@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+﻿from fastapi import APIRouter
 
 from api.upload import documents
 from core.memory import MemoryService
@@ -16,10 +16,10 @@ memory_service = MemoryService()
 @router.get("/graph")
 async def get_graph():
     """
-    Return the current FRIDAY knowledge/access graph.
+    Return the current GHOST knowledge/access graph.
 
     The frontend uses this endpoint to visualize:
-    - FRIDAY core
+    - GHOST core
     - documents
     - memories
     - projects
@@ -31,13 +31,13 @@ async def get_graph():
     edges = []
 
     # ============================================================
-    # FRIDAY CORE
+    # GHOST CORE
     # ============================================================
 
     nodes.append({
-        "id": "friday",
-        "type": "friday",
-        "label": "FRIDAY",
+        "id": "GHOST",
+        "type": "GHOST",
+        "label": "GHOST",
         "description": "Personal AI operating system.",
     })
 
@@ -69,7 +69,7 @@ async def get_graph():
             "type": "document",
             "label": filename,
             "description": (
-                "Indexed document available to FRIDAY."
+                "Indexed document available to GHOST."
             ),
             "document_id": document_id,
             "chunks": len(chunks),
@@ -78,7 +78,7 @@ async def get_graph():
         })
 
         edges.append({
-            "source": "friday",
+            "source": "GHOST",
             "target": node_id,
             "type": "access",
         })
@@ -92,14 +92,14 @@ async def get_graph():
         "type": "memory",
         "label": "Memory",
         "description": (
-            "FRIDAY's persistent conversation memory."
+            "GHOST's persistent conversation memory."
         ),
     }
 
     nodes.append(memory_root)
 
     edges.append({
-        "source": "friday",
+        "source": "GHOST",
         "target": "memory-root",
         "type": "access",
     })
@@ -219,17 +219,17 @@ async def get_graph():
     # ============================================================
 
     nodes.append({
-        "id": "project-friday",
+        "id": "project-GHOST",
         "type": "project",
-        "label": "FRIDAY",
+        "label": "GHOST",
         "description": (
-            "FRIDAY personal AI operating system."
+            "GHOST personal AI operating system."
         ),
     })
 
     edges.append({
-        "source": "friday",
-        "target": "project-friday",
+        "source": "GHOST",
+        "target": "project-GHOST",
         "type": "project",
     })
 
@@ -301,7 +301,7 @@ async def get_graph():
         if tool["status"] == "connected":
 
             edges.append({
-                "source": "friday",
+                "source": "GHOST",
                 "target": tool["id"],
                 "type": "tool",
             })
@@ -315,13 +315,13 @@ async def get_graph():
         "type": "task",
         "label": "Tasks",
         "description": (
-            "FRIDAY task execution system."
+            "GHOST task execution system."
         ),
         "status": "planned",
     })
 
     edges.append({
-        "source": "friday",
+        "source": "GHOST",
         "target": "tasks-root",
         "type": "tasks",
     })
@@ -362,3 +362,4 @@ def shorten(
         text[:length - 3]
         + "..."
     )
+
