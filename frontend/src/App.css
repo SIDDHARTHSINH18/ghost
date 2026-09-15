@@ -3237,3 +3237,36 @@ textarea:focus-visible {
   .ghost-diagram-shell { padding:12px; }
   .ghost-diagram-header { font-size:8px; letter-spacing:1.8px; }
 }
+/* GHOST SOURCE PAGES */
+.overlay-sources {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+
+.source-label {
+  color: #8fd8ff;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  opacity: 0.85;
+}
+
+.source-pages {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.source-page {
+  color: #9edfff;
+  border: 1px solid rgba(120, 210, 255, 0.28);
+  background: rgba(60, 150, 210, 0.08);
+  padding: 3px 7px;
+  border-radius: 4px;
+  font-size: 10px;
+  letter-spacing: 0.5px;
+}

@@ -149,6 +149,14 @@ def is_whole_document_request(message: str) -> bool:
 
     whole_document_phrases = [
         # Direct document summaries
+        "summarize the doc",
+        "summarise the doc",
+        "summary of the doc",
+        "summarize this doc",
+        "summarise this doc",
+        "summary of this doc",
+        "give me a summary of the doc",
+        "give me a summary of this doc",
         "summarize the document",
         "summarise the document",
         "summarize this document",
@@ -388,6 +396,12 @@ def should_use_document(message: str) -> bool:
     # ------------------------------------------------------------
 
     document_phrases = [
+        "uploaded doc",
+        "this doc",
+        "the doc",
+        "in the doc",
+        "from the doc",
+        "according to the doc",
         "uploaded document",
         "uploaded pdf",
         "uploaded file",
