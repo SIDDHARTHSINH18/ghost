@@ -1,0 +1,179 @@
+.ghost-flow-card {
+  width: 100%;
+  margin: 18px 0 24px;
+  border: 1px solid rgba(53, 223, 255, 0.24);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 50% 30%, rgba(0, 229, 255, 0.07), transparent 38%),
+    rgba(1, 8, 13, 0.96);
+  box-shadow:
+    0 0 35px rgba(0, 229, 255, 0.07),
+    inset 0 0 45px rgba(0, 229, 255, 0.025);
+  overflow: hidden;
+}
+
+.ghost-flow-header {
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 18px;
+  border-bottom: 1px solid rgba(53, 223, 255, 0.14);
+  background: rgba(2, 13, 19, 0.84);
+  color: #d9f7ff;
+}
+
+.ghost-flow-header > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ghost-flow-kicker {
+  color: rgba(85, 241, 255, 0.62);
+  font-size: 8px;
+  letter-spacing: 0.28em;
+  font-weight: 800;
+}
+
+.ghost-flow-header strong {
+  font-size: 14px;
+  letter-spacing: 0.16em;
+  font-weight: 800;
+}
+
+.ghost-flow-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: rgba(217, 247, 255, 0.62);
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  white-space: nowrap;
+}
+
+.ghost-flow-live i {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: #16f5a5;
+  box-shadow: 0 0 12px rgba(22, 245, 165, 0.85);
+}
+
+.ghost-flow-canvas {
+  height: min(62vh, 620px);
+  min-height: 420px;
+  background:
+    radial-gradient(circle at center, rgba(0, 229, 255, 0.035), transparent 42%),
+    linear-gradient(rgba(0, 229, 255, 0.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 229, 255, 0.018) 1px, transparent 1px);
+  background-size: auto, 32px 32px, 32px 32px;
+}
+
+.ghost-flow-canvas .react-flow {
+  background: transparent;
+}
+
+.ghost-flow-canvas .react-flow__attribution {
+  display: none;
+}
+
+.ghost-flow-canvas .react-flow__controls {
+  border: 1px solid rgba(53, 223, 255, 0.2);
+  box-shadow: 0 0 18px rgba(0, 229, 255, 0.06);
+  overflow: hidden;
+}
+
+.ghost-flow-canvas .react-flow__controls-button {
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-bottom: 1px solid rgba(53, 223, 255, 0.12);
+  background: rgba(3, 16, 23, 0.92);
+  color: #8defff;
+}
+
+.ghost-flow-canvas .react-flow__controls-button:hover {
+  background: rgba(7, 35, 45, 0.98);
+}
+
+.ghost-flow-canvas .react-flow__minimap {
+  border: 1px solid rgba(53, 223, 255, 0.2);
+  background: rgba(2, 12, 18, 0.88);
+}
+
+.ghost-flow-node {
+  min-width: 190px;
+  max-width: 240px;
+  padding: 15px 18px 16px;
+  border: 1px solid color-mix(in srgb, var(--ghost-accent) 60%, transparent);
+  border-radius: 15px;
+  background:
+    linear-gradient(145deg, rgba(7, 23, 31, 0.98), rgba(2, 10, 15, 0.94));
+  box-shadow:
+    0 0 22px var(--ghost-glow),
+    inset 0 0 24px rgba(255, 255, 255, 0.018);
+  color: #d9f7ff;
+  text-align: left;
+  backdrop-filter: blur(12px);
+  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+}
+
+.ghost-flow-node:hover {
+  transform: translateY(-2px);
+  border-color: var(--ghost-accent);
+  box-shadow:
+    0 0 30px var(--ghost-glow),
+    0 0 70px color-mix(in srgb, var(--ghost-accent) 12%, transparent),
+    inset 0 0 24px rgba(255, 255, 255, 0.025);
+}
+
+.ghost-flow-node-kicker {
+  margin-bottom: 7px;
+  color: var(--ghost-accent);
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.2em;
+  opacity: 0.82;
+}
+
+.ghost-flow-node-label {
+  color: #e8fbff;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.ghost-flow-handle {
+  width: 7px;
+  height: 7px;
+  border: 1px solid var(--ghost-accent) !important;
+  background: #061017 !important;
+  box-shadow: 0 0 9px var(--ghost-accent);
+}
+
+@media (max-width: 760px) {
+  .ghost-flow-canvas {
+    min-height: 360px;
+    height: 58vh;
+  }
+
+  .ghost-flow-node {
+    min-width: 155px;
+    max-width: 190px;
+    padding: 12px 14px;
+  }
+
+  .ghost-flow-node-label {
+    font-size: 13px;
+  }
+
+  .ghost-flow-header {
+    padding: 10px 13px;
+  }
+
+  .ghost-flow-live {
+    display: none;
+  }
+}

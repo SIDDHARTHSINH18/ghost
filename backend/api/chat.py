@@ -1,4 +1,5 @@
 ﻿import os
+import re
 
 from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException
@@ -106,7 +107,9 @@ orchestrator.register_provider(
 # ============================================================
 
 document_summarizer = DocumentSummarizer(
-    provider=orchestrator.get_provider("nemotron"),
+    provider=orchestrator.get_provider(
+        "nemotron"
+    ),
     model=nvidia_model,
     chunk_batch_size=5
 )
@@ -131,43 +134,39 @@ class ChatRequest(BaseModel):
 # WHOLE DOCUMENT INTENT DETECTION
 # ============================================================
 
-def is_whole_document_request(message: str) -> bool:
+# ============================================================
+# WHOLE DOCUMENT INTENT DETECTION
+# ============================================================
 
+def is_whole_document_request(message: str) -> bool:
     text = " ".join(
         message.lower().strip().split()
     )
 
+    # --------------------------------------------------------
+    # Explicit whole-document requests
+    # --------------------------------------------------------
+
     whole_document_phrases = [
-
-        # --------------------------------------------------
-        # DIRECT DOCUMENT SUMMARY REQUESTS
-        # --------------------------------------------------
-
+        # Direct document summaries
         "summarize the document",
         "summarise the document",
-
         "summarize this document",
         "summarise this document",
 
         "summarize the pdf",
         "summarise the pdf",
-
         "summarize this pdf",
         "summarise this pdf",
 
         "summary of the document",
         "summary of this document",
-
         "summary of the pdf",
         "summary of this pdf",
 
-        # --------------------------------------------------
-        # GENERAL SUMMARY REQUESTS
-        # --------------------------------------------------
-
+        # Complete / full summaries
         "give me a summary",
         "give me the summary",
-
         "give a summary",
 
         "overall summary",
@@ -175,7 +174,6 @@ def is_whole_document_request(message: str) -> bool:
 
         "complete summary",
         "full summary",
-
         "detailed summary",
         "comprehensive summary",
 
@@ -191,13 +189,9 @@ def is_whole_document_request(message: str) -> bool:
         "summarize the entire document",
         "summarise the entire document",
 
-        # --------------------------------------------------
-        # OVERVIEW
-        # --------------------------------------------------
-
+        # Whole-document overview
         "complete overview",
         "full overview",
-
         "detailed overview",
         "comprehensive overview",
 
@@ -207,32 +201,30 @@ def is_whole_document_request(message: str) -> bool:
         "give me an overview of the document",
         "give me an overview of this document",
 
-        # --------------------------------------------------
-        # DOCUMENT UNDERSTANDING
-        # --------------------------------------------------
-
-        "what is this document about",
-        "what does this document contain",
-
-        "explain the document",
-        "explain this document",
-
+        # Explicit whole-document analysis
         "analyze the entire document",
         "analyse the entire document",
 
         "analyze the whole document",
         "analyse the whole document",
 
-        "analyze this document",
-        "analyse this document",
-
         "cover the entire document",
         "cover the whole document",
 
-        # --------------------------------------------------
-        # QUESTION GENERATION
-        # --------------------------------------------------
+        # Explicit document understanding
+        "what is this document about",
+        "what does this document contain",
 
+        "explain the document",
+        "explain this document",
+
+        "explain the entire document",
+        "explain the whole document",
+
+        "analyze this document",
+        "analyse this document",
+
+        # Question generation
         "generate questions from the document",
         "generate questions based on the document",
 
@@ -246,6 +238,61 @@ def is_whole_document_request(message: str) -> bool:
         "create quiz questions"
     ]
 
+    # --------------------------------------------------------
+    # Direct explicit match
+    # --------------------------------------------------------
+
+    if any(
+        phrase in text
+        for phrase in whole_document_phrases
+    ):
+        return True
+
+    # --------------------------------------------------------
+    # Strong whole-document intent
+    #
+    # IMPORTANT:
+    # "explain" is intentionally NOT included here.
+    #
+    # Example:
+    # "Explain the Bhakti movement from the PDF"
+    # must use targeted retrieval, not whole-document
+    # summarization.
+    # --------------------------------------------------------
+
+    summary_words = [
+        "summarize",
+        "summarise",
+        "summary",
+        "overview"
+    ]
+
+    document_words = [
+        "document",
+        "pdf",
+        "file",
+        "whole",
+        "entire",
+        "everything"
+    ]
+
+    has_summary_intent = any(
+        word in text
+        for word in summary_words
+    )
+
+    has_document_scope = any(
+        word in text
+        for word in document_words
+    )
+
+    if (
+        has_summary_intent
+        and has_document_scope
+    ):
+        return True
+
+    return False
     # --------------------------------------------------
     # DIRECT PHRASE MATCH
     # --------------------------------------------------
@@ -289,8 +336,351 @@ def is_whole_document_request(message: str) -> bool:
         for word in document_words
     )
 
-    if has_summary_intent and has_document_scope:
+    if (
+        has_summary_intent
+        and has_document_scope
+    ):
         return True
+
+    return False
+
+
+# ============================================================
+# DOCUMENT QUESTION INTENT ROUTING
+# ============================================================
+
+def should_use_document(message: str) -> bool:
+    """
+    Decide whether an uploaded document should be used for this request.
+
+    IMPORTANT:
+    The frontend may keep a document_id selected after upload. That does NOT
+    mean every later question is a document question.
+
+    Document mode is enabled for explicit document/page requests and for
+    questions that clearly refer to the uploaded file. Project/memory
+    questions stay in normal GHOST mode even when a PDF is attached.
+    """
+
+    if not message:
+        return False
+
+    text = " ".join(
+        message.lower().strip().split()
+    )
+
+    # ------------------------------------------------------------
+    # Exact page requests always use the uploaded document.
+    # ------------------------------------------------------------
+
+    if extract_requested_page(message) is not None:
+        return True
+
+    # ------------------------------------------------------------
+    # Explicit whole-document requests always use the document.
+    # ------------------------------------------------------------
+
+    if is_whole_document_request(message):
+        return True
+
+    # ------------------------------------------------------------
+    # Explicit references to the uploaded document.
+    # ------------------------------------------------------------
+
+    document_phrases = [
+        "uploaded document",
+        "uploaded pdf",
+        "uploaded file",
+        "this document",
+        "this pdf",
+        "this file",
+        "the document",
+        "the pdf",
+        "the file",
+        "in the document",
+        "in this document",
+        "in the pdf",
+        "in this pdf",
+        "from the document",
+        "from this document",
+        "from the pdf",
+        "from this pdf",
+        "according to the document",
+        "according to this document",
+        "according to the pdf",
+        "according to this pdf",
+        "according to the uploaded document",
+        "according to the uploaded pdf",
+    ]
+
+    if any(phrase in text for phrase in document_phrases):
+        return True
+
+    # ------------------------------------------------------------
+    # Strong document-specific question words.
+    # These require document terminology as well, so a generic
+    # question like "explain the project" stays out of document mode.
+    # ------------------------------------------------------------
+
+    document_words = [
+        "document",
+        "pdf",
+        "file",
+        "chapter",
+        "section",
+        "paragraph",
+        "passage",
+        "page",
+        "pages",
+        "table",
+        "figure",
+        "heading",
+        "topic in the pdf",
+        "topic in the document",
+    ]
+
+    if any(word in text for word in document_words):
+        return True
+
+    # ------------------------------------------------------------
+    # Project/GHOST questions intentionally remain normal GHOST mode.
+    # This is the key fix for the problem where an uploaded history PDF
+    # hijacked questions about the GHOST project.
+    # ------------------------------------------------------------
+
+    return False
+
+
+# ============================================================
+# EXACT PAGE REQUEST DETECTION
+# ============================================================
+
+def extract_requested_page(
+    message: str
+):
+    """
+    Detect explicit page requests.
+
+    Examples:
+
+    What is on page 49?
+    Tell me about page 49
+    What does page 49 say?
+    Summarize page 49
+    Explain pg 49
+    What is on p. 49?
+
+    Returns:
+        int page number
+        None when no explicit page request exists.
+    """
+
+    if not message:
+        return None
+
+    text = " ".join(
+        message.lower().strip().split()
+    )
+
+    patterns = [
+        r"\bpage\s*\.?\s*(\d+)\b",
+        r"\bpages?\s*\.?\s*(\d+)\b",
+        r"\bpg\s*\.?\s*(\d+)\b",
+        r"\bp\s*\.\s*(\d+)\b"
+    ]
+
+    for pattern in patterns:
+
+        match = re.search(
+            pattern,
+            text
+        )
+
+        if match:
+
+            try:
+                page_number = int(
+                    match.group(1)
+                )
+
+                if page_number > 0:
+                    return page_number
+
+            except ValueError:
+                pass
+
+    return None
+
+
+# ============================================================
+# CHUNK PAGE RANGE
+# ============================================================
+
+def get_chunk_page_range(
+    chunk
+):
+    """
+    Safely determine the page range covered by a chunk.
+
+    Supports:
+
+    page
+    start_page
+    end_page
+    """
+
+    start_page = chunk.get(
+        "start_page"
+    )
+
+    end_page = chunk.get(
+        "end_page"
+    )
+
+    if start_page is None:
+        start_page = chunk.get(
+            "page"
+        )
+
+    if end_page is None:
+        end_page = start_page
+
+    try:
+
+        if start_page is not None:
+            start_page = int(
+                start_page
+            )
+
+        if end_page is not None:
+            end_page = int(
+                end_page
+            )
+
+    except (
+        TypeError,
+        ValueError
+    ):
+
+        return None, None
+
+    return (
+        start_page,
+        end_page
+    )
+
+
+# ============================================================
+# FIND EXACT PAGE CHUNKS
+# ============================================================
+
+def find_exact_page_chunks(
+    chunks,
+    requested_page
+):
+    """
+    Return every chunk whose page range
+    contains the requested page.
+
+    This intentionally does NOT use semantic
+    similarity.
+
+    Page requests are deterministic.
+    """
+
+    exact_chunks = []
+
+    for chunk in chunks:
+
+        start_page, end_page = (
+            get_chunk_page_range(
+                chunk
+            )
+        )
+
+        if (
+            start_page is None
+            or end_page is None
+        ):
+            continue
+
+        if (
+            start_page
+            <= requested_page
+            <= end_page
+        ):
+            exact_chunks.append(
+                chunk
+            )
+
+    return exact_chunks
+
+
+# ============================================================
+# CHECK DOCUMENT PAGE INDEX
+# ============================================================
+
+def document_has_page(
+    document,
+    requested_page
+):
+    """
+    Determine whether the uploaded document
+    contains the requested page according to
+    its indexed page metadata.
+    """
+
+    # --------------------------------------------------
+    # Check page metadata
+    # --------------------------------------------------
+
+    for page in document.get(
+        "pages",
+        []
+    ):
+
+        page_number = page.get(
+            "page"
+        )
+
+        try:
+
+            if int(
+                page_number
+            ) == requested_page:
+
+                return True
+
+        except (
+            TypeError,
+            ValueError
+        ):
+
+            continue
+
+    # --------------------------------------------------
+    # Check chunk ranges as fallback
+    # --------------------------------------------------
+
+    for chunk in document.get(
+        "chunks",
+        []
+    ):
+
+        start_page, end_page = (
+            get_chunk_page_range(
+                chunk
+            )
+        )
+
+        if (
+            start_page is not None
+            and end_page is not None
+            and start_page
+            <= requested_page
+            <= end_page
+        ):
+            return True
 
     return False
 
@@ -299,25 +689,33 @@ def is_whole_document_request(message: str) -> bool:
 # MEMORY CONTEXT
 # ============================================================
 
-def get_memory_context(message: str) -> str:
+def get_memory_context(
+    message: str
+) -> str:
+
     try:
-        context = memory_service.build_context(
-            message,
-            limit=5
+
+        context = (
+            memory_service.build_context(
+                message,
+                limit=5
+            )
         )
 
         if context:
             return context
 
     except Exception as error:
+
         print(
             f"Memory retrieval error: {error}"
         )
 
     return ""
 
+
 # ============================================================
-# INTELLIGENT AUTOMATIC CONVERSATION MEMORY
+# SAVE CONVERSATION MEMORY
 # ============================================================
 
 def save_conversation_memory(
@@ -325,412 +723,121 @@ def save_conversation_memory(
     assistant_response,
     document_id=None
 ):
+
     """
-    Automatically detect useful long-term information from the
-    user's message.
+    Save useful user-provided information.
 
-    GHOST should remember durable information such as:
-    - project information
-    - technologies being used
-    - user preferences
-    - important requirements
-    - decisions
-    - goals
-    - explicit instructions
-
-    GHOST should NOT remember:
-    - normal questions
-    - temporary requests
-    - generic conversation
-    - assistant-generated information
-    - secrets or credentials
+    We intentionally do not blindly store the
+    assistant's generated response.
     """
 
     try:
 
-        user_text = (user_message or "").strip()
+        user_text = (
+            user_message.strip()
+        )
 
         if not user_text:
             return
 
+        # Ignore very short messages.
+
+        if len(user_text) < 8:
+            return
+
+        # Ignore generic greetings.
+
+        ignored_messages = {
+            "hello",
+            "hi",
+            "hey",
+            "thanks",
+            "thank you",
+            "ok",
+            "okay",
+            "cool",
+            "great",
+            "bye"
+        }
+
+        if (
+            user_text.lower()
+            in ignored_messages
+        ):
+            return
+
         lower = user_text.lower()
 
-        # --------------------------------------------------------
-        # Ignore obvious temporary questions
-        # --------------------------------------------------------
-
-        temporary_starts = (
-            "what is ",
-            "what are ",
-            "who is ",
-            "where is ",
-            "when is ",
-            "why is ",
-            "why are ",
-            "how is ",
-            "how do ",
-            "how can ",
-            "can you ",
-            "could you ",
-            "would you ",
-            "tell me ",
-            "explain ",
-            "show me ",
-            "give me ",
-            "is this ",
-            "are you "
-        )
-
-        is_question = (
-            "?" in user_text
-            or lower.startswith(temporary_starts)
-        )
-
-        # Explicit memory commands override question detection.
-        explicit_memory = any(
-            trigger in lower
-            for trigger in [
-                "remember this",
-                "remember that",
-                "remember",
-                "keep in mind",
-                "from now on",
-                "going forward",
-                "don't forget"
-            ]
-        )
-
-        if is_question and not explicit_memory:
-            return
-
-        # --------------------------------------------------------
-        # MEMORY CLASSIFICATION
-        # --------------------------------------------------------
-
-        memory_type = None
-        importance = 0.0
-        tags = []
-
-        # --------------------------------------------------------
-        # PROJECT INFORMATION
-        # --------------------------------------------------------
-
-        project_patterns = [
+        memory_triggers = [
+            "remember",
+            "my name is",
             "my project is",
-            "our project is",
-            "the project is",
-            "i am building",
-            "i'm building",
-            "we are building",
-            "we're building",
-            "i am making",
-            "i'm making",
-            "we are making",
-            "we're making",
-            "building a",
-            "building an"
-        ]
-
-        if any(pattern in lower for pattern in project_patterns):
-
-            memory_type = "project"
-            importance = 0.95
-            tags.extend([
-                "project",
-                "long_term"
-            ])
-
-        # --------------------------------------------------------
-        # TECHNOLOGY / STACK INFORMATION
-        # --------------------------------------------------------
-
-        technology_terms = [
-            "fastapi",
-            "react",
-            "python",
-            "javascript",
-            "typescript",
-            "node.js",
-            "nodejs",
-            "vite",
-            "gradio",
-            "nvidia",
-            "nemotron",
-            "openai",
-            "hugging face",
-            "huggingface",
-            "transformers",
-            "pytorch",
-            "tensorflow",
-            "postgres",
-            "postgresql",
-            "supabase",
-            "mongodb",
-            "docker",
-            "github",
-            "git",
-            "vercel",
-            "digitalocean",
-            "telegram"
-        ]
-
-        found_technologies = [
-            tech
-            for tech in technology_terms
-            if tech in lower
-        ]
-
-        technology_patterns = [
-            "i use",
-            "i'm using",
-            "i am using",
-            "we use",
-            "we're using",
-            "we are using",
-            "our stack",
-            "tech stack",
-            "technology stack",
-            "built with",
-            "using"
-        ]
-
-        if (
-            found_technologies
-            and any(pattern in lower for pattern in technology_patterns)
-        ):
-
-            if memory_type is None:
-                memory_type = "project"
-
-            importance = max(importance, 0.90)
-
-            tags.extend([
-                "technology",
-                "stack"
-            ])
-
-        # --------------------------------------------------------
-        # USER PREFERENCES
-        # --------------------------------------------------------
-
-        preference_patterns = [
             "i prefer",
             "i like",
-            "i love",
             "i don't like",
             "i dont like",
-            "i hate",
-            "my preference",
-            "my preferred",
-            "i usually",
-            "i always want"
-        ]
-
-        if any(
-            pattern in lower
-            for pattern in preference_patterns
-        ):
-
-            memory_type = "preference"
-            importance = max(importance, 0.85)
-
-            tags.extend([
-                "preference",
-                "user"
-            ])
-
-        # --------------------------------------------------------
-        # USER REQUIREMENTS / INSTRUCTIONS
-        # --------------------------------------------------------
-
-        requirement_patterns = [
+            "i use",
             "i want",
             "i need",
-            "it must",
-            "it should",
-            "must have",
-            "should always",
-            "never do",
-            "do not",
-            "don't",
-            "make sure",
-            "requirement",
-            "requirement is"
-        ]
-
-        if any(
-            pattern in lower
-            for pattern in requirement_patterns
-        ):
-
-            if memory_type is None:
-                memory_type = "requirement"
-
-            importance = max(importance, 0.85)
-
-            tags.extend([
-                "requirement",
-                "user_instruction"
-            ])
-
-        # --------------------------------------------------------
-        # DECISIONS
-        # --------------------------------------------------------
-
-        decision_patterns = [
             "we decided",
-            "i decided",
-            "we chose",
-            "i chose",
-            "we will use",
-            "we're going with",
-            "we are going with",
-            "the decision is",
-            "let's use",
-            "lets use",
-            "from now on"
+            "keep in mind",
+            "from now on",
+            "going forward"
         ]
 
-        if any(
-            pattern in lower
-            for pattern in decision_patterns
-        ):
+        should_remember = any(
+            trigger in lower
+            for trigger in memory_triggers
+        )
 
-            memory_type = "decision"
-            importance = max(importance, 0.90)
-
-            tags.extend([
-                "decision",
-                "project"
-            ])
-
-        # --------------------------------------------------------
-        # GOALS / LONG-TERM INTENT
-        # --------------------------------------------------------
-
-        goal_patterns = [
-            "my goal is",
-            "our goal is",
-            "i want to build",
-            "i want to create",
-            "i am trying to build",
-            "i'm trying to build",
-            "i plan to",
-            "we plan to",
-            "long term",
-            "long-term",
-            "eventually i want"
-        ]
-
-        if any(
-            pattern in lower
-            for pattern in goal_patterns
-        ):
-
-            if memory_type is None:
-                memory_type = "goal"
-
-            importance = max(importance, 0.90)
-
-            tags.extend([
-                "goal",
-                "long_term"
-            ])
-
-        # --------------------------------------------------------
-        # EXPLICIT PERSONAL FACT
-        # --------------------------------------------------------
-
-        personal_patterns = [
-            "my name is",
-            "i am ",
-            "i'm ",
-            "i work as",
-            "i study",
-            "i live in",
-            "i am a",
-            "i'm a"
-        ]
-
-        if (
-            memory_type is None
-            and any(
-                pattern in lower
-                for pattern in personal_patterns
-            )
-        ):
-
-            memory_type = "user_fact"
-            importance = 0.80
-
-            tags.extend([
-                "user",
-                "fact"
-            ])
-
-        # --------------------------------------------------------
-        # EXPLICIT MEMORY REQUEST
-        # --------------------------------------------------------
-
-        if explicit_memory:
-
-            if memory_type is None:
-                memory_type = "user_fact"
-
-            importance = max(
-                importance,
-                0.95
-            )
-
-            tags.extend([
-                "explicit_memory"
-            ])
-
-        # --------------------------------------------------------
-        # IF NOTHING IMPORTANT WAS DETECTED
-        # --------------------------------------------------------
-
-        if memory_type is None:
+        if not should_remember:
             return
 
-        # --------------------------------------------------------
-        # BASIC SECRET PROTECTION
-        # --------------------------------------------------------
+        # --------------------------------------------------
+        # Never store obvious secrets
+        # --------------------------------------------------
 
-        sensitive_patterns = [
+        secret_terms = [
             "password",
             "api key",
             "apikey",
-            "secret key",
+            "token",
+            "secret",
             "private key",
-            "access token",
-            "auth token",
-            "bearer token",
-            "credit card",
-            "cvv",
-            "otp"
+            "otp",
+            "credit card"
         ]
 
         if any(
-            pattern in lower
-            for pattern in sensitive_patterns
+            term in lower
+            for term in secret_terms
         ):
-
-            print(
-                "GHOST memory skipped: possible sensitive information."
-            )
-
             return
 
-        # --------------------------------------------------------
-        # CLEAN TAGS
-        # --------------------------------------------------------
+        # --------------------------------------------------
+        # Determine memory type
+        # --------------------------------------------------
 
-        tags = list(dict.fromkeys(tags))
+        memory_type = "user_fact"
 
-        # --------------------------------------------------------
-        # METADATA
-        # --------------------------------------------------------
+        if "project" in lower:
+
+            memory_type = "project"
+
+        elif (
+            "prefer" in lower
+            or "like" in lower
+        ):
+
+            memory_type = "preference"
+
+        elif "decided" in lower:
+
+            memory_type = "decision"
+
+        # --------------------------------------------------
+        # Metadata
+        # --------------------------------------------------
 
         metadata = {
             "automatic": True,
@@ -738,34 +845,26 @@ def save_conversation_memory(
         }
 
         if document_id:
-            metadata["document_id"] = document_id
+            metadata[
+                "document_id"
+            ] = document_id
 
-        if found_technologies:
-            metadata["technologies"] = found_technologies
-
-        # --------------------------------------------------------
-        # SAVE
-        # --------------------------------------------------------
+        # --------------------------------------------------
+        # Save memory
+        # --------------------------------------------------
 
         memory_service.add_memory(
             content=user_text,
             memory_type=memory_type,
-            importance=importance,
+            importance=0.8,
             source="user",
-            tags=tags,
             metadata=metadata
-        )
-
-        print(
-            "GHOST automatic memory saved:"
-            f" [{memory_type}] "
-            f"{user_text[:150]}"
         )
 
     except Exception as error:
 
         print(
-            f"GHOST automatic memory warning: {error}"
+            f"Memory save warning: {error}"
         )
 
 
@@ -774,7 +873,9 @@ def save_conversation_memory(
 # ============================================================
 
 @router.post("/chat")
-async def chat(request: ChatRequest):
+async def chat(
+    request: ChatRequest
+):
 
     # ========================================================
     # VALIDATE MESSAGE
@@ -794,8 +895,10 @@ async def chat(request: ChatRequest):
     # GET PROVIDER
     # ========================================================
 
-    provider = orchestrator.get_provider(
-        request.provider
+    provider = (
+        orchestrator.get_provider(
+            request.provider
+        )
     )
 
     if provider is None:
@@ -809,7 +912,7 @@ async def chat(request: ChatRequest):
         )
 
     # ========================================================
-    # RETRIEVED SOURCE PAGES
+    # SOURCE PAGES
     # ========================================================
 
     retrieved_pages = []
@@ -818,15 +921,16 @@ async def chat(request: ChatRequest):
     # MEMORY
     # ========================================================
 
-    memory_context = get_memory_context(
-        request.message
+    memory_context = (
+        get_memory_context(
+            request.message
+        )
     )
 
     if memory_context:
 
         print(
-            "\n"
-            "----------------------------------------"
+            "\n----------------------------------------"
         )
 
         print(
@@ -845,7 +949,14 @@ async def chat(request: ChatRequest):
     # DOCUMENT MODE
     # ========================================================
 
-    if request.document_id:
+    # IMPORTANT: document_id only tells us that a document is selected.
+    # It does NOT mean every user message should use that document.
+    use_document = (
+        bool(request.document_id)
+        and should_use_document(request.message)
+    )
+
+    if use_document:
 
         document = documents.get(
             request.document_id
@@ -861,7 +972,10 @@ async def chat(request: ChatRequest):
                 )
             )
 
-        chunks = document["chunks"]
+        chunks = document.get(
+            "chunks",
+            []
+        )
 
         # ====================================================
         # WHOLE DOCUMENT MODE
@@ -879,19 +993,23 @@ async def chat(request: ChatRequest):
             )
 
             print(
-                f"Document: {document['filename']}"
+                f"Document: "
+                f"{document.get('filename', 'Unknown')}"
             )
 
             print(
-                f"Total chunks: {len(chunks)}"
+                f"Total chunks: "
+                f"{len(chunks)}"
             )
 
             # ------------------------------------------------
             # Check cached summary
             # ------------------------------------------------
 
-            cached_summary = document.get(
-                "document_summary"
+            cached_summary = (
+                document.get(
+                    "document_summary"
+                )
             )
 
             if cached_summary:
@@ -900,7 +1018,9 @@ async def chat(request: ChatRequest):
                     "Using cached document summary."
                 )
 
-                document_summary = cached_summary
+                document_summary = (
+                    cached_summary
+                )
 
             else:
 
@@ -931,13 +1051,10 @@ async def chat(request: ChatRequest):
                         status_code=500,
                         detail=(
                             "Could not create the "
-                            f"document summary: {str(error)}"
+                            "document summary: "
+                            f"{str(error)}"
                         )
                     )
-
-                # --------------------------------------------
-                # Cache summary
-                # --------------------------------------------
 
                 document[
                     "document_summary"
@@ -948,7 +1065,7 @@ async def chat(request: ChatRequest):
                 )
 
             # ------------------------------------------------
-            # Whole document = all pages are sources
+            # Whole document source pages
             # ------------------------------------------------
 
             for page in document.get(
@@ -962,9 +1079,27 @@ async def chat(request: ChatRequest):
 
                 if page_number is not None:
 
-                    retrieved_pages.append(
-                        page_number
-                    )
+                    try:
+
+                        page_number = int(
+                            page_number
+                        )
+
+                        if (
+                            page_number
+                            not in retrieved_pages
+                        ):
+
+                            retrieved_pages.append(
+                                page_number
+                            )
+
+                    except (
+                        TypeError,
+                        ValueError
+                    ):
+
+                        continue
 
             retrieved_pages.sort()
 
@@ -974,7 +1109,7 @@ async def chat(request: ChatRequest):
             )
 
             # ------------------------------------------------
-            # Memory section
+            # Memory
             # ------------------------------------------------
 
             memory_section = ""
@@ -992,13 +1127,15 @@ async def chat(request: ChatRequest):
                 )
 
             # ------------------------------------------------
-            # Build whole-document prompt
+            # Prompt
             # ------------------------------------------------
 
             user_content = (
 
                 "You are GHOST, the user's personal "
                 "AI operating system.\n\n"
+
+                "You are analyzing an uploaded document.\n\n"
 
                 "The user has requested a whole-document "
                 "analysis rather than a question about "
@@ -1020,28 +1157,21 @@ async def chat(request: ChatRequest):
                 f"{memory_section}\n"
 
                 "IMPORTANT:\n"
-
                 "- Give a clear and detailed answer.\n"
-
                 "- Stay faithful to the document.\n"
-
                 "- Do not invent facts.\n"
-
-                "- Cover the important topics and "
-                "relationships in the document.\n"
-
+                "- Cover important topics and relationships.\n"
                 "- If the requested information is not "
                 "supported by the document understanding, "
                 "say so clearly.\n"
-
                 "- If the user asks for questions, create "
                 "questions based on different parts of "
                 "the document.\n"
+                "- Do not mismatch question headings "
+                "with their actual questions.\n\n"
 
-                "- Do not mismatch a question heading "
-                "with its actual question.\n\n"
-
-                f"USER REQUEST:\n{request.message}"
+                f"USER REQUEST:\n"
+                f"{request.message}"
             )
 
             print(
@@ -1050,194 +1180,395 @@ async def chat(request: ChatRequest):
             )
 
         # ====================================================
-        # TARGETED QUESTION MODE
+        # TARGETED DOCUMENT MODE
         # ====================================================
 
         else:
 
             # ------------------------------------------------
-            # Retrieve relevant chunks
+            # EXACT PAGE MODE
             # ------------------------------------------------
 
-            relevant_chunks = (
-                document_retriever.retrieve(
-                    request.message,
-                    chunks
+            requested_page = (
+                extract_requested_page(
+                    request.message
                 )
             )
 
-            # ------------------------------------------------
-            # Optimize context
-            # ------------------------------------------------
+            if requested_page is not None:
 
-            optimized_chunks = (
-                context_optimizer.optimize(
-                    relevant_chunks
-                )
-            )
-
-            # ------------------------------------------------
-            # Build document context
-            # ------------------------------------------------
-
-            selected_context = (
-                context_optimizer.build_context(
-                    optimized_chunks
-                )
-            )
-
-            if not selected_context:
-
-                selected_context = (
-                    "No relevant section of the "
-                    "uploaded document was found "
-                    "for this question."
+                print(
+                    "\n"
+                    "========================================\n"
+                    "EXACT PAGE MODE\n"
+                    "========================================"
                 )
 
-            # ------------------------------------------------
-            # Collect source pages
-            # ------------------------------------------------
-
-            for chunk in optimized_chunks:
-
-                start_page = chunk.get(
-                    "start_page"
+                print(
+                    f"Requested page: "
+                    f"{requested_page}"
                 )
 
-                end_page = chunk.get(
-                    "end_page"
-                )
-
-                if start_page is None:
-
-                    start_page = chunk.get(
-                        "page"
+                exact_page_chunks = (
+                    find_exact_page_chunks(
+                        chunks,
+                        requested_page
                     )
+                )
 
-                if end_page is None:
+                page_exists = (
+                    document_has_page(
+                        document,
+                        requested_page
+                    )
+                )
 
-                    end_page = start_page
+                # ============================================
+                # PAGE NOT FOUND
+                # ============================================
 
                 if (
-                    start_page is not None
-                    and end_page is not None
+                    not exact_page_chunks
+                    or not page_exists
                 ):
+
+                    print(
+                        f"Page {requested_page} "
+                        "not available in indexed document."
+                    )
+
+                    retrieved_pages = []
+
+                    user_content = (
+
+                        "You are GHOST, the user's "
+                        "personal AI operating system.\n\n"
+
+                        "The user has asked about an exact "
+                        "page in an uploaded document.\n\n"
+
+                        f"REQUESTED PAGE: "
+                        f"{requested_page}\n\n"
+
+                        "The requested page is NOT available "
+                        "in the indexed document context.\n\n"
+
+                        "IMPORTANT:\n"
+                        f"- Clearly tell the user that "
+                        f"page {requested_page} is not "
+                        "available in the uploaded document "
+                        "context.\n"
+                        "- Do NOT guess what is on the page.\n"
+                        "- Do NOT use information from other "
+                        "pages to answer the page-specific "
+                        "question.\n"
+                        "- Do NOT invent document content.\n"
+                        "- Do NOT claim that the page exists "
+                        "when it cannot be accessed.\n\n"
+
+                        f"USER QUESTION:\n"
+                        f"{request.message}"
+                    )
+
+                # ============================================
+                # PAGE FOUND
+                # ============================================
+
+                else:
+
+                    print(
+                        f"Exact page chunks found: "
+                        f"{len(exact_page_chunks)}"
+                    )
+
+                    # ----------------------------------------
+                    # Optimize only the requested page
+                    # ----------------------------------------
+
+                    optimized_chunks = (
+                        context_optimizer.optimize(
+                            exact_page_chunks
+                        )
+                    )
+
+                    # ----------------------------------------
+                    # If optimizer removed everything,
+                    # fall back to the exact chunks.
+                    # ----------------------------------------
+
+                    if not optimized_chunks:
+
+                        optimized_chunks = (
+                            exact_page_chunks
+                        )
+
+                    selected_context = (
+                        context_optimizer.build_context(
+                            optimized_chunks
+                        )
+                    )
+
+                    if not selected_context:
+
+                        selected_context = (
+                            "\n\n".join(
+                                chunk.get(
+                                    "text",
+                                    ""
+                                )
+                                for chunk
+                                in exact_page_chunks
+                            )
+                        )
+
+                    retrieved_pages = [
+                        requested_page
+                    ]
+
+                    source_instruction = (
+                        "The answer must be based ONLY "
+                        f"on page {requested_page} "
+                        "of the uploaded document."
+                    )
+
+                    # ----------------------------------------
+                    # Memory
+                    # ----------------------------------------
+
+                    memory_section = ""
+
+                    if memory_context:
+
+                        memory_section = (
+                            "\n\n"
+                            "RELEVANT GHOST MEMORY:\n"
+                            "--------------------------------\n"
+                            f"{memory_context}\n"
+                            "--------------------------------\n"
+                            "Use memory only when it is "
+                            "relevant to the user's question. "
+                            "Do not use memory to replace "
+                            "missing page content.\n"
+                        )
+
+                    # ----------------------------------------
+                    # Exact page prompt
+                    # ----------------------------------------
+
+                    user_content = (
+
+                        "You are GHOST, the user's personal "
+                        "AI operating system.\n\n"
+
+                        "You are analyzing an uploaded document.\n\n"
+
+                        f"The user explicitly requested "
+                        f"information from page "
+                        f"{requested_page}.\n\n"
+
+                        "EXACT PAGE CONTEXT:\n"
+                        "================================\n"
+
+                        f"{selected_context}\n"
+
+                        "================================\n\n"
+
+                        f"{source_instruction}\n"
+
+                        f"{memory_section}\n"
+
+                        "IMPORTANT:\n"
+                        "- Use ONLY the exact page context "
+                        "provided above.\n"
+                        "- Do not use information from other "
+                        "document pages.\n"
+                        "- Do not guess or invent missing "
+                        "content.\n"
+                        "- Answer the user's exact page "
+                        "question directly.\n"
+                        "- If the requested information is "
+                        "not visible in the supplied page "
+                        "context, say that it is not available "
+                        "in the page context.\n"
+                        f"- Treat page {requested_page} as the "
+                        "only authoritative document page "
+                        "for this request.\n\n"
+
+                        f"USER QUESTION:\n"
+                        f"{request.message}"
+                    )
+
+                    print(
+                        f"Exact page source: "
+                        f"[{requested_page}]"
+                    )
+
+            # ------------------------------------------------
+            # NORMAL SEMANTIC RETRIEVAL
+            # ------------------------------------------------
+
+            else:
+
+                relevant_chunks = (
+                    document_retriever.retrieve(
+                        request.message,
+                        chunks
+                    )
+                )
+
+                optimized_chunks = (
+                    context_optimizer.optimize(
+                        relevant_chunks
+                    )
+                )
+
+                selected_context = (
+                    context_optimizer.build_context(
+                        optimized_chunks
+                    )
+                )
+
+                if not selected_context:
+
+                    selected_context = (
+                        "No relevant section of the "
+                        "uploaded document was found "
+                        "for this question."
+                    )
+
+                # --------------------------------------------
+                # Collect source pages
+                # --------------------------------------------
+
+                for chunk in optimized_chunks:
+
+                    start_page, end_page = (
+                        get_chunk_page_range(
+                            chunk
+                        )
+                    )
+
+                    if (
+                        start_page is None
+                        or end_page is None
+                    ):
+                        continue
 
                     for page in range(
                         start_page,
                         end_page + 1
                     ):
 
-                        if page not in retrieved_pages:
+                        if (
+                            page
+                            not in retrieved_pages
+                        ):
 
                             retrieved_pages.append(
                                 page
                             )
 
-            retrieved_pages.sort()
+                retrieved_pages.sort()
 
-            # ------------------------------------------------
-            # Source instruction
-            # ------------------------------------------------
+                # --------------------------------------------
+                # Source instruction
+                # --------------------------------------------
 
-            if retrieved_pages:
+                if retrieved_pages:
 
-                page_text = ", ".join(
-                    str(page)
-                    for page in retrieved_pages
-                )
+                    page_text = ", ".join(
+                        str(page)
+                        for page
+                        in retrieved_pages
+                    )
 
-                source_instruction = (
-                    "The relevant information was "
-                    f"found on page(s): {page_text}."
-                )
+                    source_instruction = (
+                        "The relevant information was "
+                        f"found on page(s): "
+                        f"{page_text}."
+                    )
 
-            else:
+                else:
 
-                source_instruction = (
-                    "The page number of the relevant "
-                    "information could not be determined."
-                )
+                    source_instruction = (
+                        "The page number of the relevant "
+                        "information could not be determined."
+                    )
 
-            # ------------------------------------------------
-            # Memory section
-            # ------------------------------------------------
+                # --------------------------------------------
+                # Memory
+                # --------------------------------------------
 
-            memory_section = ""
+                memory_section = ""
 
-            if memory_context:
+                if memory_context:
 
-                memory_section = (
-                    "\n\n"
-                    "RELEVANT GHOST MEMORY:\n"
+                    memory_section = (
+                        "\n\n"
+                        "RELEVANT GHOST MEMORY:\n"
+                        "--------------------------------\n"
+                        f"{memory_context}\n"
+                        "--------------------------------\n"
+                        "Use this memory only when it "
+                        "adds relevant continuity. "
+                        "The uploaded document remains "
+                        "the primary source for document facts.\n"
+                    )
+
+                # --------------------------------------------
+                # Normal targeted prompt
+                # --------------------------------------------
+
+                user_content = (
+
+                    "You are GHOST, the user's personal "
+                    "AI operating system.\n\n"
+
+                    "You are analyzing an uploaded document.\n\n"
+
+                    "Answer the user's question using the "
+                    "relevant document context provided below.\n\n"
+
+                    "RELEVANT DOCUMENT CONTEXT:\n"
                     "--------------------------------\n"
-                    f"{memory_context}\n"
-                    "--------------------------------\n"
-                    "Use this memory only when it is "
-                    "relevant to the current request. "
-                    "The uploaded document remains the "
-                    "primary source for document facts.\n"
+
+                    f"{selected_context}\n"
+
+                    "--------------------------------\n\n"
+
+                    f"{source_instruction}\n"
+
+                    f"{memory_section}\n"
+
+                    "IMPORTANT:\n"
+                    "- Give a clear and detailed answer.\n"
+                    "- Do not invent information.\n"
+                    "- If the answer cannot be found in the "
+                    "provided document context, clearly say "
+                    "that it was not found.\n"
+                    "- Use the uploaded document as the "
+                    "primary source of truth for document facts.\n"
+                    "- Use GHOST memory only when it adds "
+                    "relevant continuity.\n\n"
+
+                    f"USER QUESTION:\n"
+                    f"{request.message}"
                 )
 
-            # ------------------------------------------------
-            # Build targeted question prompt
-            # ------------------------------------------------
+                print(
+                    f"\n"
+                    f"Document: "
+                    f"{document.get('filename', 'Unknown')} | "
+                    f"Chunks: {len(chunks)} | "
+                    f"Retrieved: {len(relevant_chunks)} | "
+                    f"Optimized: {len(optimized_chunks)} | "
+                    f"Pages: {retrieved_pages}"
+                )
 
-            user_content = (
-
-                "You are GHOST, the user's personal "
-                "AI operating system.\n\n"
-
-                "Answer the user's question using the "
-                "relevant document context provided below.\n\n"
-
-                "RELEVANT DOCUMENT CONTEXT:\n"
-                "--------------------------------\n"
-
-                f"{selected_context}\n"
-
-                "--------------------------------\n\n"
-
-                f"{source_instruction}\n"
-
-                f"{memory_section}\n"
-
-                "IMPORTANT:\n"
-
-                "- Give a clear and detailed answer.\n"
-
-                "- Do not invent information.\n"
-
-                "- If the answer cannot be found in the "
-                "provided document context, clearly say "
-                "that it was not found.\n"
-
-                "- Use the uploaded document as the "
-                "primary source of truth for document facts.\n"
-
-                "- Use GHOST memory only when it adds "
-                "relevant continuity.\n\n"
-
-                f"USER QUESTION:\n{request.message}"
-            )
-
-            # ------------------------------------------------
-            # Logging
-            # ------------------------------------------------
-
-            print(
-                f"\n"
-                f"Document: {document['filename']} | "
-                f"Chunks: {len(chunks)} | "
-                f"Retrieved: {len(relevant_chunks)} | "
-                f"Optimized: {len(optimized_chunks)} | "
-                f"Pages: {retrieved_pages}"
-            )
-
-            print(
-                f"Sources for frontend: "
-                f"{retrieved_pages}"
-            )
+                print(
+                    f"Sources for frontend: "
+                    f"{retrieved_pages}"
+                )
 
     # ========================================================
     # NO DOCUMENT MODE
@@ -1245,86 +1576,32 @@ async def chat(request: ChatRequest):
 
     else:
 
-        # ----------------------------------------------------
-        # Build memory-aware prompt
-        # ----------------------------------------------------
-
         if memory_context:
-             user_content = (
 
-        "You are GHOST, the user's personal "
-        "AI operating system.\n\n"
+            user_content = (
 
-        "You are NOT ChatGPT.\n"
+                "You are GHOST, the user's "
+                "personal AI operating system.\n\n"
 
-        "Do NOT describe yourself as "
-        "\"a language model developed by NVIDIA\" "
-        "unless the user explicitly asks about "
-        "the underlying AI model or provider.\n\n"
+                "Use the relevant long-term memory "
+                "below when it helps maintain continuity.\n\n"
 
-        "IMPORTANT MEMORY BEHAVIOR:\n"
+                "RELEVANT LONG-TERM MEMORY:\n"
+                "--------------------------------\n"
 
-        "The relevant long-term memory below contains "
-        "facts already known about the user, their projects, "
-        "preferences, decisions, and ongoing work.\n\n"
+                f"{memory_context}\n"
 
-        "- When the user's question can be answered using "
-        "the memory, answer directly using that memory.\n"
+                "--------------------------------\n\n"
 
-        "- Do NOT ask the user to repeat information "
-        "already present in memory.\n"
+                "IMPORTANT:\n"
+                "- Use memory only when relevant.\n"
+                "- Do not assume every memory is correct "
+                "if it conflicts with the current request.\n"
+                "- The current user request has priority.\n\n"
 
-        "- Do NOT ask whether the user means a project "
-        "that is already established in memory.\n"
-
-        "- Treat explicit user-provided memories as "
-        "established context unless the user corrects them.\n"
-
-        "- Do NOT replace known user-specific information "
-        "with a generic answer.\n"
-
-        "- Do NOT say \"I assume\", \"could you tell me\", "
-        "or \"what project are you referring to?\" when "
-        "the answer is already present in memory.\n"
-
-        "- Only ask a clarification question when the "
-        "available memory and current conversation genuinely "
-        "do not contain enough information to answer.\n\n"
-
-        "EXAMPLE:\n"
-
-        "If memory says the user's project is GHOST and "
-        "the user asks \"What are we building?\", answer:\n"
-
-        "\"We're building GHOST â€” your personal AI "
-        "operating system.\"\n\n"
-
-        "RELEVANT LONG-TERM MEMORY:\n"
-        "--------------------------------\n"
-
-        f"{memory_context}\n"
-
-        "--------------------------------\n\n"
-
-        "IMPORTANT MEMORY RULES:\n"
-
-        "- Use relevant memory when answering "
-        "the user's request.\n"
-
-        "- Treat explicit user-provided memory "
-        "as authoritative unless the user "
-        "corrects it.\n"
-
-        "- Never invent memories.\n"
-
-        "- Do not replace user-specific facts "
-        "with generic model information.\n"
-
-        "- The current user request has priority.\n\n"
-
-        f"CURRENT USER REQUEST:\n"
-        f"{request.message}"
-    )
+                f"CURRENT USER REQUEST:\n"
+                f"{request.message}"
+            )
 
         else:
 
@@ -1332,13 +1609,6 @@ async def chat(request: ChatRequest):
 
                 "You are GHOST, the user's personal "
                 "AI operating system.\n\n"
-
-                "You are NOT ChatGPT.\n"
-
-                "Do NOT describe yourself as "
-                "\"a language model developed by NVIDIA\" "
-                "unless the user explicitly asks about "
-                "the underlying AI model or provider.\n\n"
 
                 "Answer the user's request directly, "
                 "clearly, and naturally.\n\n"
@@ -1358,55 +1628,108 @@ async def chat(request: ChatRequest):
         try:
 
             # ------------------------------------------------
+            # Special deterministic page-not-found response
+            # ------------------------------------------------
+
+            requested_page = (
+                extract_requested_page(
+                    request.message
+                )
+            )
+
+            page_chunks = []
+
+            if (
+                use_document
+                and requested_page is not None
+            ):
+
+                document_for_page_check = (
+                    documents.get(
+                        request.document_id
+                    )
+                )
+
+                if document_for_page_check:
+
+                    page_chunks = (
+                        find_exact_page_chunks(
+                            document_for_page_check.get(
+                                "chunks",
+                                []
+                            ),
+                            requested_page
+                        )
+                    )
+
+            if (
+                use_document
+                and requested_page is not None
+                and not page_chunks
+            ):
+
+                # --------------------------------------------
+                # No source pages are sent here.
+                # --------------------------------------------
+
+                yield (
+                    "GHOST could not access "
+                    f"page {requested_page} "
+                    "in the uploaded document context.\n\n"
+                    "I will not guess or use another page "
+                    "to answer a page-specific question."
+                )
+
+                return
+
+            # ------------------------------------------------
             # Send source metadata first
             # ------------------------------------------------
 
             if (
-                request.document_id
+                use_document
                 and retrieved_pages
             ):
 
                 yield (
                     "__SOURCES__:"
-                    f"{','.join(map(str, retrieved_pages))}\n"
+                    f"{','.join(
+                        map(
+                            str,
+                            retrieved_pages
+                        )
+                    )}\n"
                 )
 
             # ------------------------------------------------
             # Generate AI response
             # ------------------------------------------------
 
-            async for chunk in provider.generate_stream(
+            async for chunk in (
+                provider.generate_stream(
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": user_content
+                        }
+                    ],
 
-                messages=[
-                    {
-                        "role": "user",
-                        "content": user_content
+                    model=(
+                        request.model
+                        or nvidia_model
+                    ),
+
+                    max_tokens=2048,
+
+                    temperature=0.0,
+
+                    chat_template_kwargs={
+                        "enable_thinking": False
                     }
-                ],
-
-                model=(
-                    request.model
-                    or nvidia_model
-                ),
-
-                max_tokens=2048,
-
-                temperature=0.0,
-
-                chat_template_kwargs={
-                    "enable_thinking": False
-                }
+                )
             ):
 
-                # ------------------------------------------------
-                # Stream to frontend
-                # ------------------------------------------------
-
                 yield chunk
-
-                # ------------------------------------------------
-                # Save complete response for memory
-                # ------------------------------------------------
 
                 if chunk is not None:
 
@@ -1415,7 +1738,7 @@ async def chat(request: ChatRequest):
                     )
 
             # ------------------------------------------------
-            # Save conversation after successful generation
+            # Save useful memory
             # ------------------------------------------------
 
             if response_text.strip():
@@ -1423,7 +1746,11 @@ async def chat(request: ChatRequest):
                 save_conversation_memory(
                     user_message=request.message,
                     assistant_response=response_text,
-                    document_id=request.document_id
+                    document_id=(
+                        request.document_id
+                        if use_document
+                        else None
+                    )
                 )
 
         except Exception as error:
@@ -1445,4 +1772,3 @@ async def chat(request: ChatRequest):
         generate_response(),
         media_type="text/plain"
     )
-

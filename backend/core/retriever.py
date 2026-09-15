@@ -1,4 +1,5 @@
 ﻿import re
+import threading
 from typing import List, Dict
 
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -8,6 +9,11 @@ from sentence_transformers import SentenceTransformer
 
 
 class DocumentRetriever:
+
+    MODEL_NAME = "all-MiniLM-L6-v2"
+
+    _embedding_model = None
+    _embedding_lock = threading.Lock()
 
     def __init__(
         self,
@@ -26,11 +32,37 @@ class DocumentRetriever:
         self.keyword_weight = keyword_weight
         self.phrase_weight = phrase_weight
 
-        self.embedding_model = SentenceTransformer(
-            "all-MiniLM-L6-v2"
-        )
+        # IMPORTANT:
+        # Do NOT load SentenceTransformer here.
+        #
+        # The model is loaded lazily only when embeddings
+        # or semantic retrieval are actually required.
+
+    @classmethod
+    def _get_embedding_model(cls):
+
+        if cls._embedding_model is None:
+
+            with cls._embedding_lock:
+
+                if cls._embedding_model is None:
+
+                    print(
+                        f"Loading embedding model: {cls.MODEL_NAME}"
+                    )
+
+                    cls._embedding_model = SentenceTransformer(
+                        cls.MODEL_NAME
+                    )
+
+                    print(
+                        "Embedding model loaded successfully."
+                    )
+
+        return cls._embedding_model
 
     def _tokenize(self, text: str) -> set:
+
         return set(
             re.findall(
                 r"\b[a-zA-Z0-9]+\b",
@@ -60,8 +92,13 @@ class DocumentRetriever:
         chunk_text: str
     ) -> float:
 
-        query_clean = " ".join(query.lower().split())
-        chunk_clean = " ".join(chunk_text.lower().split())
+        query_clean = " ".join(
+            query.lower().split()
+        )
+
+        chunk_clean = " ".join(
+            chunk_text.lower().split()
+        )
 
         if not query_clean:
             return 0.0
@@ -98,12 +135,14 @@ class DocumentRetriever:
         if not chunks:
             return []
 
+        embedding_model = self._get_embedding_model()
+
         texts = [
             chunk["text"]
             for chunk in chunks
         ]
 
-        embeddings = self.embedding_model.encode(
+        embeddings = embedding_model.encode(
             texts,
             normalize_embeddings=True,
             show_progress_bar=False
@@ -118,7 +157,9 @@ class DocumentRetriever:
                 "embedding": embeddings[index].tolist()
             }
 
-            updated_chunks.append(updated_chunk)
+            updated_chunks.append(
+                updated_chunk
+            )
 
         return updated_chunks
 
@@ -133,7 +174,9 @@ class DocumentRetriever:
 
         try:
 
-            query_embedding = self.embedding_model.encode(
+            embedding_model = self._get_embedding_model()
+
+            query_embedding = embedding_model.encode(
                 [query],
                 normalize_embeddings=True,
                 show_progress_bar=False
@@ -146,7 +189,11 @@ class DocumentRetriever:
             ]
 
             if len(document_embeddings) != len(chunks):
-                return [0.0 for _ in chunks]
+
+                return [
+                    0.0
+                    for _ in chunks
+                ]
 
             scores = cosine_similarity(
                 query_embedding,
@@ -169,6 +216,130 @@ class DocumentRetriever:
                 for _ in chunks
             ]
 
+    def _get_numeric_chunk_id(
+        self,
+        chunk_id
+    ):
+
+        """
+        Safely convert common chunk ID formats into
+        a numeric position.
+
+        Supported examples:
+
+        5
+        "5"
+        "chunk_5"
+        "chunk-5"
+
+        Returns None if no numeric position exists.
+        """
+
+        if isinstance(chunk_id, int):
+            return chunk_id
+
+        if isinstance(chunk_id, float):
+            return int(chunk_id)
+
+        if isinstance(chunk_id, str):
+
+            match = re.search(
+                r"(\d+)$",
+                chunk_id
+            )
+
+            if match:
+                return int(
+                    match.group(1)
+                )
+
+        return None
+
+    def _find_neighbor_chunks(
+        self,
+        selected,
+        chunks,
+        selected_ids
+    ):
+
+        if self.neighbor_chunks <= 0:
+            return []
+
+        chunks_by_position = {}
+
+        for chunk in chunks:
+
+            chunk_id = chunk.get(
+                "chunk_id"
+            )
+
+            position = self._get_numeric_chunk_id(
+                chunk_id
+            )
+
+            if position is not None:
+
+                chunks_by_position[
+                    position
+                ] = chunk
+
+        neighbors = []
+
+        for chunk in list(selected):
+
+            chunk_id = chunk.get(
+                "chunk_id"
+            )
+
+            position = self._get_numeric_chunk_id(
+                chunk_id
+            )
+
+            if position is None:
+                continue
+
+            for offset in range(
+                1,
+                self.neighbor_chunks + 1
+            ):
+
+                for neighbor_position in (
+                    position - offset,
+                    position + offset
+                ):
+
+                    neighbor = chunks_by_position.get(
+                        neighbor_position
+                    )
+
+                    if neighbor is None:
+                        continue
+
+                    neighbor_id = neighbor.get(
+                        "chunk_id"
+                    )
+
+                    if neighbor_id in selected_ids:
+                        continue
+
+                    neighbors.append(
+                        {
+                            **neighbor,
+                            "score": 0.0,
+                            "semantic_score": 0.0,
+                            "tfidf_score": 0.0,
+                            "keyword_score": 0.0,
+                            "phrase_score": 0.0,
+                            "is_neighbor": True
+                        }
+                    )
+
+                    selected_ids.add(
+                        neighbor_id
+                    )
+
+        return neighbors
+
     def retrieve(
         self,
         query: str,
@@ -182,6 +353,10 @@ class DocumentRetriever:
             chunk["text"]
             for chunk in chunks
         ]
+
+        # --------------------------------------------------
+        # TF-IDF RETRIEVAL
+        # --------------------------------------------------
 
         try:
 
@@ -211,14 +386,24 @@ class DocumentRetriever:
                 for _ in chunks
             ]
 
+        # --------------------------------------------------
+        # SEMANTIC RETRIEVAL
+        # --------------------------------------------------
+
         semantic_scores = self._semantic_scores(
             query,
             chunks
         )
 
+        # --------------------------------------------------
+        # HYBRID SCORING
+        # --------------------------------------------------
+
         scored_chunks = []
 
-        for index, chunk in enumerate(chunks):
+        for index, chunk in enumerate(
+            chunks
+        ):
 
             keyword_score = self._keyword_score(
                 query,
@@ -239,21 +424,42 @@ class DocumentRetriever:
             )
 
             final_score = (
-                (semantic_score * self.semantic_weight)
-                + (tfidf_score * self.tfidf_weight)
-                + (keyword_score * self.keyword_weight)
-                + (phrase_score * self.phrase_weight)
+                (
+                    semantic_score
+                    * self.semantic_weight
+                )
+                +
+                (
+                    tfidf_score
+                    * self.tfidf_weight
+                )
+                +
+                (
+                    keyword_score
+                    * self.keyword_weight
+                )
+                +
+                (
+                    phrase_score
+                    * self.phrase_weight
+                )
             )
 
-            scored_chunks.append({
-                **chunk,
-                "score": final_score,
-                "semantic_score": semantic_score,
-                "tfidf_score": tfidf_score,
-                "keyword_score": keyword_score,
-                "phrase_score": phrase_score,
-                "is_neighbor": False
-            })
+            scored_chunks.append(
+                {
+                    **chunk,
+                    "score": final_score,
+                    "semantic_score": semantic_score,
+                    "tfidf_score": tfidf_score,
+                    "keyword_score": keyword_score,
+                    "phrase_score": phrase_score,
+                    "is_neighbor": False
+                }
+            )
+
+        # --------------------------------------------------
+        # SORT BY RELEVANCE
+        # --------------------------------------------------
 
         scored_chunks.sort(
             key=lambda x: x["score"],
@@ -269,65 +475,50 @@ class DocumentRetriever:
         if not relevant_chunks:
             return []
 
+        # --------------------------------------------------
+        # TOP K
+        # --------------------------------------------------
+
         selected = relevant_chunks[
             :self.top_k
         ]
 
         selected_ids = {
-            chunk["chunk_id"]
+            chunk.get("chunk_id")
             for chunk in selected
         }
 
-        chunks_by_id = {
-            chunk["chunk_id"]: chunk
-            for chunk in chunks
-        }
+        # --------------------------------------------------
+        # NEIGHBOR CONTEXT
+        # --------------------------------------------------
 
-        neighbors = []
+        neighbors = self._find_neighbor_chunks(
+            selected,
+            chunks,
+            selected_ids
+        )
 
-        for chunk in list(selected):
+        selected.extend(
+            neighbors
+        )
 
-            chunk_id = chunk["chunk_id"]
+        # --------------------------------------------------
+        # FINAL ORDER
+        # --------------------------------------------------
 
-            for offset in range(
-                1,
-                self.neighbor_chunks + 1
-            ):
+        def sort_key(chunk):
 
-                for neighbor_id in (
-                    chunk_id - offset,
-                    chunk_id + offset
-                ):
+            position = self._get_numeric_chunk_id(
+                chunk.get("chunk_id")
+            )
 
-                    if neighbor_id in selected_ids:
-                        continue
+            if position is None:
+                return float("inf")
 
-                    neighbor = chunks_by_id.get(
-                        neighbor_id
-                    )
-
-                    if neighbor is None:
-                        continue
-
-                    neighbors.append({
-                        **neighbor,
-                        "score": 0.0,
-                        "semantic_score": 0.0,
-                        "tfidf_score": 0.0,
-                        "keyword_score": 0.0,
-                        "phrase_score": 0.0,
-                        "is_neighbor": True
-                    })
-
-                    selected_ids.add(
-                        neighbor_id
-                    )
-
-        selected.extend(neighbors)
+            return position
 
         selected.sort(
-            key=lambda x: x["chunk_id"]
+            key=sort_key
         )
 
         return selected
-

@@ -1,42 +1,332 @@
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
-
+import { useEffect, useMemo, useRef, useState } from "react";
 import ForceGraph2D from "react-force-graph-2d";
-
 import "./App.css";
+import GhostFlowDiagram from "./GhostFlowDiagram";
 
+const API_URL = "http://127.0.0.1:8000";
 
-const API_URL =
-  "http://127.0.0.1:8000";
-
+const LAYOUT_KEY = "ghost-spatial-layout-v2";
+const ACTIVE_DOCUMENT_KEY = "ghost-active-document-v2";
 
 const NODE_COLORS = {
-  ghost: "#ffffff",
-  document: "#19f58b",
-  memory: "#3b82ff",
-  project: "#a855f7",
-  task: "#f59e0b",
-  tool: "#ff6b35",
+  ghost: "#eaffff",
+  document: "#16f5a5",
+  memory: "#299cff",
+  project: "#a855ff",
+  task: "#ff9d32",
+  tool: "#ffd43b",
+  system: "#55d9ff",
 };
 
-
-const NODE_LABELS = {
-  ghost: "GHOST",
-  document: "Documents",
-  memory: "Memory",
-  project: "Projects",
-  task: "Tasks",
-  tool: "Tools",
+const ZONES = {
+  document: [-330, -170],
+  memory: [-360, 120],
+  project: [40, -245],
+  task: [120, 190],
+  tool: [390, 15],
+  system: [-20, -390],
 };
 
+const DRAWER_WIDTH = 410;
+
+function readJSON(key, fallback) {
+  try {
+    const value = localStorage.getItem(key);
+    return value ? JSON.parse(value) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function saveJSON(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Best effort.
+  }
+}
+
+function stableHash(value = "") {
+  let hash = 2166136261;
+
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return Math.abs(hash >>> 0);
+}
+
+function createStablePosition(node, index, total) {
+  if (node.type === "ghost") {
+    return {
+      ...node,
+      x: 0,
+      y: 0,
+      fx: 0,
+      fy: 0,
+    };
+  }
+
+  const [cx, cy] = ZONES[node.type] || [0, 0];
+
+  const hash = stableHash(
+    String(node.id || node.label || index)
+  );
+
+  const angle =
+    (index / Math.max(total, 1)) *
+      Math.PI *
+      2 +
+    ((hash % 100) / 100) * 0.55;
+
+  const radius =
+    90 +
+    (hash % 90) +
+    (index % 4) * 22;
+
+  const x =
+    cx +
+    Math.cos(angle) * radius;
+
+  const y =
+    cy +
+    Math.sin(angle) *
+      radius *
+      0.72;
+
+  return {
+    ...node,
+    x,
+    y,
+    fx: x,
+    fy: y,
+  };
+}
+
+function buildVisualGraph(graphData) {
+  const stored = readJSON(
+    LAYOUT_KEY,
+    {}
+  );
+
+  const counts = {};
+
+  const nodes = (
+    graphData.nodes || []
+  ).map((node) => {
+    const type =
+      node.type || "system";
+
+    counts[type] =
+      (counts[type] || 0) + 1;
+
+    return {
+      ...node,
+      type,
+    };
+  });
+
+  const indexes = {};
+
+  const placedNodes = nodes.map(
+    (node) => {
+      if (stored[node.id]) {
+        return {
+          ...node,
+          x: stored[node.id].x,
+          y: stored[node.id].y,
+          fx: stored[node.id].x,
+          fy: stored[node.id].y,
+        };
+      }
+
+      const index =
+        indexes[node.type] || 0;
+
+      indexes[node.type] =
+        index + 1;
+
+      return createStablePosition(
+        node,
+        index,
+        counts[node.type] || 1
+      );
+    }
+  );
+
+  return {
+    nodes: placedNodes,
+    links: (
+      graphData.links || []
+    ).map((edge) => ({
+      ...edge,
+    })),
+  };
+}
+
+function renderGhostResponse(text = "") {
+  if (!text) {
+    return (
+      <div className="empty-response">
+        Waiting for GHOST response...
+      </div>
+    );
+  }
+
+  const normalized = text.replace(/\r\n/g, "\n");
+  const blocks = normalized.split(/(```[\s\S]*?```)/g);
+
+  return (
+    <div className="ghost-response-body">
+      {blocks.map((block, blockIndex) => {
+        if (block.startsWith("```")) {
+          const lines = block.split("\n");
+          const language = lines[0]
+            .replace("```", "")
+            .trim()
+            .toLowerCase();
+          const code = lines.slice(1, -1).join("\n");
+
+          if (
+            language === "mermaid" ||
+            language === "flowchart" ||
+            /^flowchart\b/i.test(code.trim()) ||
+            /^graph\s+(TD|TB|LR|RL|BT)\b/i.test(code.trim())
+          ) {
+            return (
+              <GhostFlowDiagram
+                key={blockIndex}
+                source={code}
+              />
+            );
+          }
+
+          return (
+            <pre
+              className="ghost-code"
+              key={blockIndex}
+            >
+              <div className="code-language">
+                {language || "CODE"}
+              </div>
+              <code>{code}</code>
+            </pre>
+          );
+        }
+
+        const lines = block.split("\n");
+
+        return (
+          <div
+            className="ghost-text-block"
+            key={blockIndex}
+          >
+            {lines.map((line, lineIndex) => {
+              const value = line.trim();
+
+              if (!value) {
+                return (
+                  <div
+                    className="ghost-spacer"
+                    key={lineIndex}
+                  />
+                );
+              }
+
+              if (value.startsWith("### ")) {
+                return (
+                  <h4 key={lineIndex}>
+                    {value.slice(4)}
+                  </h4>
+                );
+              }
+
+              if (value.startsWith("## ")) {
+                return (
+                  <h3 key={lineIndex}>
+                    {value.slice(3)}
+                  </h3>
+                );
+              }
+
+              if (value.startsWith("# ")) {
+                return (
+                  <h2 key={lineIndex}>
+                    {value.slice(2)}
+                  </h2>
+                );
+              }
+
+              if (/^[-*•]\s+/.test(value)) {
+                return (
+                  <div
+                    className="ghost-bullet"
+                    key={lineIndex}
+                  >
+                    <span>◆</span>
+                    <span>
+                      {value.replace(
+                        /^[-*•]\s+/,
+                        ""
+                      )}
+                    </span>
+                  </div>
+                );
+              }
+
+              if (/^\d+[.)]\s+/.test(value)) {
+                return (
+                  <div
+                    className="ghost-numbered"
+                    key={lineIndex}
+                  >
+                    {value}
+                  </div>
+                );
+              }
+
+              if (value.startsWith("> ")) {
+                return (
+                  <div
+                    className="ghost-quote"
+                    key={lineIndex}
+                  >
+                    {value.slice(2)}
+                  </div>
+                );
+              }
+
+              return (
+                <p key={lineIndex}>
+                  {value}
+                </p>
+              );
+            })}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 function App() {
+  const graphRef =
+    useRef(null);
 
-  const graphRef = useRef(null);
+  const fileInputRef =
+    useRef(null);
+
+  const responseScrollRef =
+    useRef(null);
+
+  const [viewport, setViewport] =
+    useState({
+      width:
+        window.innerWidth,
+      height:
+        window.innerHeight,
+    });
 
   const [graphData, setGraphData] =
     useState({
@@ -56,39 +346,107 @@ function App() {
   const [loading, setLoading] =
     useState(false);
 
-  const [documentId, setDocumentId] =
-    useState(null);
+  const [uploading, setUploading] =
+    useState(false);
+
+  const [uploadStatus, setUploadStatus] =
+    useState("");
 
   const [backendOnline, setBackendOnline] =
     useState(false);
 
-  const ghostState = loading ? "THINKING" : "READY";
+  const storedDocument =
+    readJSON(
+      ACTIVE_DOCUMENT_KEY,
+      null
+    );
 
+  const [documentId, setDocumentId] =
+    useState(
+      storedDocument?.id || null
+    );
 
-  // ============================================================
-  // LOAD REAL GHOST GRAPH
-  // ============================================================
+  const [documentName, setDocumentName] =
+    useState(
+      storedDocument?.name || ""
+    );
+
+  const [activeDrawer, setActiveDrawer] =
+    useState(null);
+
+  const [answerMode, setAnswerMode] =
+    useState("normal");
+
+  const ghostState = uploading
+    ? "INGESTING"
+    : loading
+      ? "THINKING"
+      : "LISTENING";
 
   useEffect(() => {
+    function handleResize() {
+      setViewport({
+        width:
+          window.innerWidth,
+        height:
+          window.innerHeight,
+      });
+    }
 
+    window.addEventListener(
+      "resize",
+      handleResize
+    );
+
+    return () =>
+      window.removeEventListener(
+        "resize",
+        handleResize
+      );
+  }, []);
+
+  useEffect(() => {
     loadGraph();
 
     const interval =
       setInterval(
         loadGraph,
-        5000
+        loading ? 12000 : 7000
       );
 
     return () =>
       clearInterval(interval);
+  }, [loading]);
 
-  }, []);
+  useEffect(() => {
+    if (
+      documentId &&
+      documentName
+    ) {
+      saveJSON(
+        ACTIVE_DOCUMENT_KEY,
+        {
+          id: documentId,
+          name: documentName,
+        }
+      );
+    }
+  }, [
+    documentId,
+    documentName,
+  ]);
 
+  useEffect(() => {
+    if (
+      responseScrollRef.current
+    ) {
+      responseScrollRef.current.scrollTop =
+        responseScrollRef.current.scrollHeight;
+    }
+  }, [messages, loading]);
 
   async function loadGraph() {
-
     try {
-
       const response =
         await fetch(
           `${API_URL}/api/graph`
@@ -112,12 +470,12 @@ function App() {
       setBackendOnline(true);
 
       setGraphData({
-        nodes: data.nodes || [],
-        links: data.edges || [],
+        nodes:
+          data.nodes || [],
+        links:
+          data.edges || [],
       });
-
     } catch (error) {
-
       console.error(
         "GHOST graph error:",
         error
@@ -127,417 +485,589 @@ function App() {
     }
   }
 
-
-  // ============================================================
-  // PREPARE FORCE GRAPH
-  // ============================================================
-
   const visualGraph =
-    useMemo(() => {
-
-      if (
-        !graphData.nodes ||
-        graphData.nodes.length === 0
-      ) {
-        return {
-          nodes: [],
-          links: [],
-        };
-      }
-
-      return {
-        nodes: graphData.nodes.map(
-          (node) => ({
-            ...node,
-          })
+    useMemo(
+      () =>
+        buildVisualGraph(
+          graphData
         ),
-
-        links: graphData.links.map(
-          (edge) => ({
-            ...edge,
-            source: edge.source,
-            target: edge.target,
-          })
-        ),
-      };
-
-    }, [graphData]);
-
-
-  // ============================================================
-  // CHAT
-  // ============================================================
-
-  const sendMessage = async () => {
-  if (!message.trim() || loading) {
-    return;
-  }
-
-  const userMessage = message.trim();
-
-  // Show user's message immediately
-  setMessages((previous) => [
-    ...previous,
-    {
-      role: "user",
-      content: userMessage,
-    },
-  ]);
-
-  setMessage("");
-  setLoading(true);
-
-  // Create an empty assistant message immediately
-  setMessages((previous) => [
-    ...previous,
-    {
-      role: "assistant",
-      content: "",
-      pages: [],
-    },
-  ]);
-
-  try {
-    const response = await fetch(
-      `${API_URL}/api/chat`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          message: userMessage,
-          provider: "nemotron",
-          model: null,
-          document_id: documentId,
-        }),
-      }
+      [graphData]
     );
 
-    if (!response.ok) {
-      const errorText = await response.text();
+  const nodeCounts =
+    useMemo(() => {
+      const counts = {
+        document: 0,
+        memory: 0,
+        project: 0,
+        task: 0,
+        tool: 0,
+        system: 0,
+      };
 
-      throw new Error(
-        errorText || "GHOST request failed"
+      graphData.nodes.forEach(
+        (node) => {
+          const type =
+            node.type ||
+            "system";
+
+          if (
+            counts[type] !==
+            undefined
+          ) {
+            counts[type] += 1;
+          }
+        }
       );
+
+      return counts;
+    }, [graphData]);
+
+  const topHubs =
+    useMemo(() => {
+      return [
+        ...graphData.nodes,
+      ]
+        .filter(
+          (node) =>
+            node.type !==
+            "ghost"
+        )
+        .sort(
+          (a, b) =>
+            Number(
+              b.isRoot || false
+            ) -
+            Number(
+              a.isRoot || false
+            )
+        )
+        .slice(0, 8);
+    }, [graphData]);
+
+  function openDrawer(name) {
+    setActiveDrawer(
+      (current) =>
+        current === name
+          ? null
+          : name
+    );
+  }
+
+  function closeDrawer() {
+    setActiveDrawer(null);
+  }
+
+  async function uploadDocument(
+    file
+  ) {
+    if (
+      !file ||
+      uploading
+    ) {
+      return;
     }
 
-    if (!response.body) {
-      throw new Error(
-        "GHOST returned no response body."
+    setUploading(true);
+    setUploadStatus(
+      `INGESTING · ${file.name}`
+    );
+
+    try {
+      const formData =
+        new FormData();
+
+      formData.append(
+        "file",
+        file
       );
-    }
 
-    const reader =
-      response.body.getReader();
-
-    const decoder =
-      new TextDecoder("utf-8");
-
-    let assistantResponse = "";
-    let sourcePages = [];
-
-    while (true) {
-      const {
-        value,
-        done,
-      } = await reader.read();
-
-      if (done) {
-        break;
-      }
-
-      const chunk =
-        decoder.decode(
-          value,
+      const response =
+        await fetch(
+          `${API_URL}/api/upload`,
           {
-            stream: true,
+            method: "POST",
+            body: formData,
           }
         );
 
-      if (!chunk) {
-        continue;
+      const text =
+        await response.text();
+
+      let data = {};
+
+      try {
+        data =
+          JSON.parse(text);
+      } catch {
+        data = {
+          detail: text,
+        };
       }
 
-      // --------------------------------------------------
-      // Extract document source pages
-      // --------------------------------------------------
+      if (!response.ok) {
+        throw new Error(
+          data.detail ||
+            data.message ||
+            "Upload failed"
+        );
+      }
 
-      const sourceMatch =
-        chunk.match(
-          /__SOURCES__:([0-9,\s]+)/
+      const id =
+        data.document_id ||
+        data.id ||
+        data.document?.id;
+
+      if (!id) {
+        throw new Error(
+          "Upload succeeded but no document ID was returned."
+        );
+      }
+
+      const name =
+        data.filename ||
+        data.document?.filename ||
+        file.name;
+
+      setDocumentId(id);
+      setDocumentName(name);
+
+      saveJSON(
+        ACTIVE_DOCUMENT_KEY,
+        {
+          id,
+          name,
+        }
+      );
+
+      setUploadStatus(
+        "DOCUMENT READY · INDEXED"
+      );
+
+      setActiveDrawer(
+        "documents"
+      );
+
+      await loadGraph();
+    } catch (error) {
+      console.error(
+        "GHOST upload error:",
+        error
+      );
+
+      setUploadStatus(
+        `UPLOAD ERROR · ${error.message}`
+      );
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  function handleFileChange(
+    event
+  ) {
+    const file =
+      event.target.files?.[0];
+
+    if (file) {
+      uploadDocument(file);
+    }
+
+    event.target.value = "";
+  }
+
+  async function sendMessage() {
+    if (
+      !message.trim() ||
+      loading
+    ) {
+      return;
+    }
+
+    const userMessage =
+      message.trim();
+
+    setMessages(
+      (previous) => [
+        ...previous,
+        {
+          role: "user",
+          content:
+            userMessage,
+        },
+        {
+          role: "assistant",
+          content: "",
+          pages: [],
+        },
+      ]
+    );
+
+    setMessage("");
+    setLoading(true);
+    setActiveDrawer("chat");
+    setAnswerMode("normal");
+
+    try {
+      const response =
+        await fetch(
+          `${API_URL}/api/chat`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+            body: JSON.stringify({
+              message:
+                userMessage,
+              provider:
+                "nemotron",
+              model: null,
+              document_id:
+                documentId,
+            }),
+          }
         );
 
-      if (sourceMatch) {
-        sourcePages =
-          sourceMatch[1]
-            .split(",")
-            .map((page) =>
-              page.trim()
-            )
-            .filter(Boolean)
-            .map(Number);
+      if (!response.ok) {
+        const errorText =
+          await response.text();
 
-        // Remove source metadata
-        const cleanChunk =
-          chunk.replace(
-            /__SOURCES__:[0-9,\s]+\n?/,
-            ""
-          );
-
-        assistantResponse +=
-          cleanChunk;
-      } else {
-        assistantResponse +=
-          chunk;
+        throw new Error(
+          errorText ||
+            "GHOST request failed"
+        );
       }
 
-      // --------------------------------------------------
-      // Update the assistant message live
-      // --------------------------------------------------
+      if (!response.body) {
+        throw new Error(
+          "GHOST returned no response body."
+        );
+      }
 
-      setMessages((previous) => {
-        const updated = [...previous];
+      const reader =
+        response.body.getReader();
 
-        // Find the latest assistant message
-        let assistantIndex = -1;
+      const decoder =
+        new TextDecoder(
+          "utf-8"
+        );
+
+      let assistantResponse =
+        "";
+
+      let sourcePages = [];
+
+      let lastUpdate = 0;
+
+      while (true) {
+        const {
+          value,
+          done,
+        } = await reader.read();
+
+        if (done) {
+          break;
+        }
+
+        const chunk =
+          decoder.decode(
+            value,
+            {
+              stream: true,
+            }
+          );
+
+        if (!chunk) {
+          continue;
+        }
+
+        const sourceMatch =
+          chunk.match(
+            /__SOURCES__:([0-9,\s]+)/
+          );
+
+        if (sourceMatch) {
+          sourcePages =
+            sourceMatch[1]
+              .split(",")
+              .map(
+                (page) =>
+                  page.trim()
+              )
+              .filter(Boolean)
+              .map(Number);
+
+          assistantResponse +=
+            chunk.replace(
+              /__SOURCES__:[0-9,\s]+\n?/,
+              ""
+            );
+        } else {
+          assistantResponse +=
+            chunk;
+        }
+
+        const now =
+          performance.now();
+
+        if (
+          now - lastUpdate >
+          90
+        ) {
+          updateAssistantMessage(
+            assistantResponse,
+            sourcePages
+          );
+
+          lastUpdate = now;
+        }
+      }
+
+      assistantResponse +=
+        decoder.decode();
+
+      updateAssistantMessage(
+        assistantResponse.trim(),
+        sourcePages
+      );
+
+      setTimeout(
+        loadGraph,
+        500
+      );
+    } catch (error) {
+      console.error(
+        "GHOST chat error:",
+        error
+      );
+
+      updateAssistantMessage(
+        `GHOST ERROR · ${error.message}`,
+        []
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function updateAssistantMessage(
+    content,
+    pages
+  ) {
+    setMessages(
+      (previous) => {
+        const updated = [
+          ...previous,
+        ];
 
         for (
-          let i = updated.length - 1;
+          let i =
+            updated.length - 1;
           i >= 0;
-          i--
+          i -= 1
         ) {
           if (
             updated[i].role ===
             "assistant"
           ) {
-            assistantIndex = i;
+            updated[i] = {
+              ...updated[i],
+              content,
+              pages,
+            };
+
             break;
           }
         }
 
-        if (assistantIndex === -1) {
-          return updated;
-        }
-
-        updated[assistantIndex] = {
-          ...updated[assistantIndex],
-          content:
-            assistantResponse,
-          pages:
-            sourcePages,
-        };
-
         return updated;
-      });
+      }
+    );
+  }
+
+  function handleKeyDown(
+    event
+  ) {
+    if (
+      event.key === "Enter" &&
+      !event.shiftKey
+    ) {
+      event.preventDefault();
+      sendMessage();
     }
+  }
 
-    // Flush any remaining decoder data
-    assistantResponse +=
-      decoder.decode();
+  function saveCurrentLayout() {
+    const layout = {};
 
-    // Final update
-    setMessages((previous) => {
-      const updated = [...previous];
-
-      let assistantIndex = -1;
-
-      for (
-        let i = updated.length - 1;
-        i >= 0;
-        i--
-      ) {
+    visualGraph.nodes.forEach(
+      (node) => {
         if (
-          updated[i].role ===
-          "assistant"
+          node.id &&
+          Number.isFinite(
+            node.x
+          ) &&
+          Number.isFinite(
+            node.y
+          )
         ) {
-          assistantIndex = i;
-          break;
+          layout[node.id] = {
+            x: node.x,
+            y: node.y,
+          };
         }
       }
-
-      if (assistantIndex !== -1) {
-        updated[assistantIndex] = {
-          ...updated[assistantIndex],
-          content:
-            assistantResponse.trim(),
-          pages:
-            sourcePages,
-        };
-      }
-
-      return updated;
-    });
-
-    // Refresh the GHOST knowledge graph
-    setTimeout(() => {
-      loadGraph();
-    }, 500);
-
-  } catch (error) {
-    console.error(
-      "GHOST chat error:",
-      error
     );
 
-    setMessages((previous) => {
-      const updated = [...previous];
-
-      let assistantIndex = -1;
-
-      for (
-        let i = updated.length - 1;
-        i >= 0;
-        i--
-      ) {
-        if (
-          updated[i].role ===
-          "assistant"
-        ) {
-          assistantIndex = i;
-          break;
-        }
-      }
-
-      if (assistantIndex !== -1) {
-        updated[assistantIndex] = {
-          ...updated[assistantIndex],
-          content:
-            `GHOST ERROR: ${error.message}`,
-          pages: [],
-        };
-      }
-
-      return updated;
-    });
-
-  } finally {
-    setLoading(false);
+    saveJSON(
+      LAYOUT_KEY,
+      layout
+    );
   }
-};
 
-  // ============================================================
-  // ENTER KEY
-  // ============================================================
+  function handleNodeDragEnd(
+    node
+  ) {
+    node.fx = node.x;
+    node.fy = node.y;
 
-  const handleKeyDown =
-    (event) => {
+    saveCurrentLayout();
+  }
 
-      if (
-        event.key === "Enter" &&
-        !event.shiftKey
-      ) {
+  function handleNodeClick(
+    node
+  ) {
+    setSelectedNode(node);
+    setActiveDrawer(
+      "inspector"
+    );
+  }
 
-        event.preventDefault();
+  function resetLayout() {
+    localStorage.removeItem(
+      LAYOUT_KEY
+    );
 
-        sendMessage();
-      }
-    };
+    loadGraph();
+  }
 
+  function focusGhost() {
+    if (!graphRef.current) {
+      return;
+    }
 
-  // ============================================================
-  // NODE CLICK
-  // ============================================================
+    graphRef.current.centerAt(
+      0,
+      0,
+      700
+    );
 
-  const handleNodeClick =
-    (node) => {
+    graphRef.current.zoom(
+      0.9,
+      700
+    );
+  }
 
-      setSelectedNode(node);
+  function focusType(type) {
+    const node =
+      visualGraph.nodes.find(
+        (item) =>
+          item.type === type
+      );
 
-    };
+    if (
+      !node ||
+      !graphRef.current
+    ) {
+      return;
+    }
 
+    setSelectedNode(node);
 
-  // ============================================================
-  // NEW CHAT
-  // ============================================================
+    graphRef.current.centerAt(
+      node.x,
+      node.y,
+      700
+    );
 
-  const newChat =
-    () => {
+    graphRef.current.zoom(
+      1.35,
+      700
+    );
+  }
 
-      if (loading) {
-        return;
-      }
+  function clearDocument() {
+    setDocumentId(null);
+    setDocumentName("");
+    setUploadStatus("");
 
-      setMessages([]);
+    localStorage.removeItem(
+      ACTIVE_DOCUMENT_KEY
+    );
 
-      setMessage("");
+    loadGraph();
+  }
 
-      setDocumentId(null);
+  function newChat() {
+    if (loading) {
+      return;
+    }
 
-      setSelectedNode(null);
-    };
+    setMessages([]);
+    setMessage("");
+    setAnswerMode("normal");
+    setActiveDrawer("chat");
+  }
 
+  const latestAssistant =
+    [...messages]
+      .reverse()
+      .find(
+        (item) =>
+          item.role ===
+            "assistant" &&
+          item.content
+      );
 
-  // ============================================================
-  // FOCUS GHOST
-  // ============================================================
-
-  const focusFriday =
-    () => {
-
-      const ghost =
-        visualGraph.nodes.find(
-          (node) =>
-            node.id ===
-            "ghost"
-        );
-
-      if (
-        ghost &&
-        graphRef.current
-      ) {
-
-        graphRef.current.centerAt(
-          ghost.x,
-          ghost.y,
-          800
-        );
-
-        graphRef.current.zoom(
-          1.5,
-          800
-        );
-      }
-    };
-
-
-  // ============================================================
-  // RENDER
-  // ============================================================
+  const activeMessageCount =
+    messages.filter(
+      (item) =>
+        item.role ===
+        "user"
+    ).length;
 
   return (
+    <main className="ghost-app">
+      <div className="ambient-grid" />
+      <div className="scanlines" />
+      <div className="vignette" />
+      <div className="ambient-noise" />
 
-    <div className="ghost-app">
+      {/* BRAND */}
 
-      {/* ======================================================
-          TOP LEFT BRAND
-      ====================================================== */}
-
-      <div className="brand">
-
-        <div className="brand-title">
+      <header className="ghost-brand">
+        <div className="brand-main">
           GHOST
         </div>
 
-        <div className="brand-subtitle">
+        <div className="brand-sub">
           PERSONAL AI OPERATING SYSTEM
         </div>
 
-      </div>
+        <div className="brand-rule" />
+      </header>
 
+      {/* STATUS */}
 
-      {/* ======================================================
-          TOP RIGHT STATUS
-      ====================================================== */}
-
-      <div className="top-status">
-
+      <div className="system-status">
         <span
-          className={
+          className={`system-dot ${
             backendOnline
-              ? "status-dot online"
-              : "status-dot offline"
-          }
+              ? "online"
+              : "offline"
+          }`}
         />
 
         <span>
@@ -546,130 +1076,142 @@ function App() {
             : "OFFLINE"}
         </span>
 
-        <span className="status-divider">
-          |
+        <span className="status-slash">
+          /
         </span>
 
         <span>
           NEMOTRON
         </span>
 
+        <span className="status-slash">
+          /
+        </span>
+
+        <span>
+          {ghostState}
+        </span>
       </div>
 
+      {/* GRAPH */}
 
-      {/* ======================================================
-          KNOWLEDGE GRAPH
-      ====================================================== */}
-
-      <div className={`ghost-core ghost-core-${ghostState.toLowerCase()}`} aria-hidden="true">
-        <div className="ghost-core-orbit ghost-core-orbit-a" />
-        <div className="ghost-core-orbit ghost-core-orbit-b" />
-        <div className="ghost-core-ring">
-          <div className="ghost-core-inner">
-            <span className="ghost-core-mark">G</span>
-            <span className="ghost-core-state">{ghostState}</span>
-          </div>
-        </div>
-        <div className="ghost-core-label">GHOST CORE</div>
-      </div>
-
-      <div className="graph-layer">
-
-        {visualGraph.nodes.length > 0 ? (
-
+      <section className="graph-stage">
+        {visualGraph.nodes
+          .length > 0 ? (
           <ForceGraph2D
-
             ref={graphRef}
-
-            graphData={visualGraph}
-
-            backgroundColor="#000000"
-
-            width={window.innerWidth}
-
-            height={window.innerHeight}
-
-            nodeRelSize={4}
-
-            nodeVal={(node) =>
-              node.type === "ghost"
-                ? 5
-                : node.isRoot
-                ? 3
-                : 1.5
+            graphData={
+              visualGraph
             }
-
-            nodeColor={(node) =>
-              NODE_COLORS[
-                node.type
-              ] || "#ffffff"
+            width={
+              viewport.width
             }
-
-            linkColor={() =>
-              "rgba(255,255,255,0.10)"
+            height={
+              viewport.height
             }
+            backgroundColor="rgba(0,0,0,0)"
+            nodeRelSize={3}
+            nodeVal={(node) => {
+              if (
+                node.type ===
+                "ghost"
+              ) {
+                return 7;
+              }
 
+              if (node.isRoot) {
+                return 4.5;
+              }
+
+              return 2.1;
+            }}
+            linkColor={(link) =>
+              link.type ===
+              "access"
+                ? "rgba(75,210,255,0.55)"
+                : "rgba(45,163,220,0.14)"
+            }
             linkWidth={(link) =>
-              link.type === "access"
-                ? 1
-                : 0.5
+              link.type ===
+              "access"
+                ? 1.15
+                : 0.55
             }
-
             linkDirectionalParticles={
-              0
+              1
             }
-
+            linkDirectionalParticleWidth={
+              1.2
+            }
+            linkDirectionalParticleSpeed={
+              0.0018
+            }
             d3AlphaDecay={1}
-
             d3VelocityDecay={1}
-
             cooldownTicks={0}
-
-            enableNodeDrag={true}
-
+            enableNodeDrag
             onNodeClick={
               handleNodeClick
             }
-
+            onNodeDragEnd={
+              handleNodeDragEnd
+            }
             nodeCanvasObject={(
               node,
               ctx,
               globalScale
             ) => {
-
               const color =
                 NODE_COLORS[
                   node.type
-                ] || "#ffffff";
+                ] ||
+                NODE_COLORS.system;
 
+              const isGhost =
+                node.type ===
+                "ghost";
+
+              const isRoot =
+                Boolean(
+                  node.isRoot
+                );
 
               const radius =
-                node.type === "ghost"
-                  ? 7
-                  : node.isRoot
-                  ? 5
-                  : 3;
-
-
-              // glow
+                isGhost
+                  ? 6.5
+                  : isRoot
+                    ? 4.2
+                    : 2.4;
 
               ctx.beginPath();
 
               ctx.arc(
                 node.x,
                 node.y,
-                radius * 2.4,
+                radius * 4,
                 0,
                 Math.PI * 2
               );
 
               ctx.fillStyle =
-                `${color}22`;
+                `${color}14`;
 
               ctx.fill();
 
+              ctx.beginPath();
 
-              // node
+              ctx.arc(
+                node.x,
+                node.y,
+                radius * 2,
+                0,
+                Math.PI * 2
+              );
+
+              ctx.fillStyle =
+                `${color}20`;
+
+              ctx.fill();
 
               ctx.beginPath();
 
@@ -686,372 +1228,1388 @@ function App() {
 
               ctx.fill();
 
+              if (isRoot) {
+                ctx.beginPath();
 
-              // label
+                ctx.arc(
+                  node.x,
+                  node.y,
+                  radius + 2.8,
+                  0,
+                  Math.PI * 2
+                );
+
+                ctx.strokeStyle =
+                  `${color}80`;
+
+                ctx.lineWidth =
+                  0.9;
+
+                ctx.stroke();
+              }
+
+              const label =
+                node.label || "";
+
+              const shouldLabel =
+                isGhost ||
+                isRoot ||
+                globalScale >
+                  0.72;
 
               if (
-                globalScale > 0.65
+                label &&
+                shouldLabel
               ) {
-
-                const label =
-                  node.label || "";
-
+                const fontSize =
+                  isRoot ||
+                  isGhost
+                    ? 10.5
+                    : Math.max(
+                        8,
+                        9 /
+                          globalScale
+                      );
 
                 ctx.font =
-                  `${Math.max(
-                    8,
-                    10 / globalScale
-                  )}px Inter, Arial`;
-
+                  `${fontSize}px Inter, Arial, sans-serif`;
 
                 ctx.fillStyle =
-                  "rgba(255,255,255,0.65)";
-
+                  isRoot ||
+                  isGhost
+                    ? "rgba(225,250,255,0.96)"
+                    : "rgba(153,213,235,0.72)";
 
                 ctx.textAlign =
                   "center";
-
 
                 ctx.fillText(
                   label,
                   node.x,
                   node.y +
                     radius +
-                    13 / globalScale
+                    12 /
+                      globalScale
                 );
               }
-
             }}
-
           />
-
         ) : (
-
           <div className="graph-loading">
-            CONNECTING TO GHOST...
+            <span className="loading-pulse">
+              ●
+            </span>
+            INITIALIZING GHOST
+            NEURAL MAP
           </div>
-
         )}
+      </section>
 
-      </div>
+      {/* GHOST CORE */}
 
+      <section className="ghost-core">
+        <div className="core-orbit orbit-a" />
+        <div className="core-orbit orbit-b" />
+        <div className="core-orbit orbit-c" />
 
-      {/* ======================================================
-          LEFT LEGEND
-      ====================================================== */}
-
-      <div className="legend">
-
-        {Object.entries(
-          NODE_LABELS
-        )
-          .filter(
-            ([type]) =>
-              type !== "ghost"
-          )
-          .map(
-            ([type, label]) => (
-
-              <div
-                className="legend-item"
-                key={type}
-              >
-
-                <span
-                  className="legend-dot"
-                  style={{
-                    background:
-                      NODE_COLORS[
-                        type
-                      ],
-                  }}
-                />
-
-                <span>
-                  {label}
-                </span>
-
-              </div>
-
-            )
-          )}
-
-      </div>
-
-
-      {/* ======================================================
-          NODE INSPECTOR
-      ====================================================== */}
-
-      {selectedNode && (
-
-        <div className="inspector">
-
-          <button
-            className="inspector-close"
-            onClick={() =>
-              setSelectedNode(null)
-            }
-          >
-            ×
-          </button>
-
-
-          <div
-            className="inspector-type"
-            style={{
-              color:
-                NODE_COLORS[
-                  selectedNode.type
-                ],
-            }}
-          >
-            {NODE_LABELS[
-              selectedNode.type
-            ] || "SYSTEM"}
-          </div>
-
-
-          <div className="inspector-title">
-            {selectedNode.label}
-          </div>
-
-
-          <div className="inspector-description">
-            {selectedNode.description}
-          </div>
-
-
-          {selectedNode.type ===
-            "document" && (
-
-            <div className="inspector-meta">
-
-              <div>
-                <span>
-                  TYPE
-                </span>
-
-                <strong>
-                  DOCUMENT
-                </strong>
-              </div>
-
-              <div>
-                <span>
-                  CHUNKS
-                </span>
-
-                <strong>
-                  {
-                    selectedNode.chunks ??
-                    0
-                  }
-                </strong>
-              </div>
-
-              <div>
-                <span>
-                  PAGES
-                </span>
-
-                <strong>
-                  {
-                    selectedNode.pages ??
-                    0
-                  }
-                </strong>
-              </div>
-
-              <div>
-                <span>
-                  STATUS
-                </span>
-
-                <strong>
-                  {
-                    selectedNode.status ??
-                    "UNKNOWN"
-                  }
-                </strong>
-              </div>
-
-            </div>
-
-          )}
-
-
-          {selectedNode.type ===
-            "tool" && (
-
-            <div className="inspector-status">
-
-              STATUS
-
-              <strong>
-                {
-                  selectedNode.status ??
-                  "UNKNOWN"
-                }
-              </strong>
-
-            </div>
-
-          )}
-
+        <div className="core-ticks">
+          {Array.from(
+            { length: 8 }
+          ).map((_, index) => (
+            <i key={index} />
+          ))}
         </div>
 
-      )}
+        <div
+          className={`core-disc core-${ghostState.toLowerCase()}`}
+        >
+          <div className="core-glow" />
 
+          <div className="core-inner">
+            <div className="core-name">
+              G.H.O.S.T.
+            </div>
 
-      {/* ======================================================
-          CHAT RESPONSE OVERLAY
-      ====================================================== */}
+            <div className="core-line" />
 
-      {messages.length > 0 && (
+            <div className="core-state">
+              {ghostState}
+            </div>
+          </div>
+        </div>
 
-        <div className="response-panel">
+        <div className="core-status">
+          <span className="core-status-dot" />
+          {ghostState}
+        </div>
 
-          <div className="response-header">
+        <div className="core-hint">
+          NEURAL CORE
+        </div>
+      </section>
 
-            <span>
-              GHOST
-            </span>
+      {/* LEFT NEURAL HUD */}
+
+      <aside className="left-hud">
+        <div className="hud-heading">
+          NEURAL MAP
+        </div>
+
+        <button
+          className="hud-row"
+          onClick={() =>
+            focusType(
+              "document"
+            )
+          }
+        >
+          <span className="hud-dot document" />
+          <span>
+            DOCUMENTS
+          </span>
+          <b>
+            {
+              nodeCounts.document
+            }
+          </b>
+        </button>
+
+        <button
+          className="hud-row"
+          onClick={() =>
+            focusType(
+              "memory"
+            )
+          }
+        >
+          <span className="hud-dot memory" />
+          <span>
+            MEMORY
+          </span>
+          <b>
+            {
+              nodeCounts.memory
+            }
+          </b>
+        </button>
+
+        <button
+          className="hud-row"
+          onClick={() =>
+            focusType(
+              "project"
+            )
+          }
+        >
+          <span className="hud-dot project" />
+          <span>
+            PROJECTS
+          </span>
+          <b>
+            {
+              nodeCounts.project
+            }
+          </b>
+        </button>
+
+        <button
+          className="hud-row"
+          onClick={() =>
+            focusType("task")
+          }
+        >
+          <span className="hud-dot task" />
+          <span>
+            TASKS
+          </span>
+          <b>
+            {nodeCounts.task}
+          </b>
+        </button>
+
+        <button
+          className="hud-row"
+          onClick={() =>
+            focusType("tool")
+          }
+        >
+          <span className="hud-dot tool" />
+          <span>
+            TOOLS
+          </span>
+          <b>
+            {nodeCounts.tool}
+          </b>
+        </button>
+
+        <div className="hud-divider" />
+
+        <div className="hud-heading">
+          TOP HUBS
+        </div>
+
+        <div className="hub-list">
+          {topHubs.map(
+            (node, index) => (
+              <button
+                className="hub-row"
+                key={
+                  node.id ||
+                  index
+                }
+                onClick={() =>
+                  handleNodeClick(
+                    node
+                  )
+                }
+              >
+                <span className="hub-dot" />
+                <span>
+                  {node.label ||
+                    "UNKNOWN"}
+                </span>
+              </button>
+            )
+          )}
+        </div>
+      </aside>
+
+      {/* ICON RAIL */}
+
+      <nav className="ghost-rail">
+        <button
+          className={`rail-button ${
+            activeDrawer ===
+            "chat"
+              ? "active"
+              : ""
+          }`}
+          onClick={() =>
+            openDrawer("chat")
+          }
+          title="Chat"
+        >
+          <span className="rail-glyph">
+            ◉
+          </span>
+          <span className="rail-label">
+            CHAT
+          </span>
+        </button>
+
+        <button
+          className={`rail-button ${
+            activeDrawer ===
+            "documents"
+              ? "active document-active"
+              : ""
+          }`}
+          onClick={() =>
+            openDrawer(
+              "documents"
+            )
+          }
+          title="Documents"
+        >
+          <span className="rail-glyph">
+            ▤
+          </span>
+          <span className="rail-label">
+            DOCS
+          </span>
+        </button>
+
+        <button
+          className={`rail-button ${
+            activeDrawer ===
+            "memory"
+              ? "active memory-active"
+              : ""
+          }`}
+          onClick={() =>
+            openDrawer("memory")
+          }
+          title="Memory"
+        >
+          <span className="rail-glyph">
+            ◈
+          </span>
+          <span className="rail-label">
+            MEMORY
+          </span>
+        </button>
+
+        <button
+          className={`rail-button ${
+            activeDrawer ===
+            "projects"
+              ? "active project-active"
+              : ""
+          }`}
+          onClick={() =>
+            openDrawer(
+              "projects"
+            )
+          }
+          title="Projects"
+        >
+          <span className="rail-glyph">
+            ◇
+          </span>
+          <span className="rail-label">
+            PROJECTS
+          </span>
+        </button>
+
+        <button
+          className={`rail-button ${
+            activeDrawer ===
+            "tasks"
+              ? "active task-active"
+              : ""
+          }`}
+          onClick={() =>
+            openDrawer("tasks")
+          }
+          title="Tasks"
+        >
+          <span className="rail-glyph">
+            ⊞
+          </span>
+          <span className="rail-label">
+            TASKS
+          </span>
+        </button>
+
+        <button
+          className={`rail-button ${
+            activeDrawer ===
+            "tools"
+              ? "active tool-active"
+              : ""
+          }`}
+          onClick={() =>
+            openDrawer("tools")
+          }
+          title="Tools"
+        >
+          <span className="rail-glyph">
+            ⌁
+          </span>
+          <span className="rail-label">
+            TOOLS
+          </span>
+        </button>
+
+        <button
+          className={`rail-button ${
+            activeDrawer ===
+            "guardian"
+              ? "active guardian-active"
+              : ""
+          }`}
+          onClick={() =>
+            openDrawer(
+              "guardian"
+            )
+          }
+          title="Guardian"
+        >
+          <span className="rail-glyph">
+            ⛨
+          </span>
+          <span className="rail-label">
+            GUARDIAN
+          </span>
+        </button>
+
+        <div className="rail-separator" />
+
+        <button
+          className="rail-button"
+          onClick={focusGhost}
+          title="Center GHOST"
+        >
+          <span className="rail-glyph">
+            ◎
+          </span>
+          <span className="rail-label">
+            CORE
+          </span>
+        </button>
+      </nav>
+
+      {/* SIDE DRAWER */}
+
+      {activeDrawer && (
+        <aside
+          className={`ghost-drawer ${
+            activeDrawer ===
+            "chat"
+              ? "drawer-chat"
+              : ""
+          }`}
+        >
+          <div className="drawer-header">
+            <div>
+              <div className="drawer-kicker">
+                GHOST SYSTEM
+              </div>
+
+              <div className="drawer-title">
+                {activeDrawer ===
+                "chat"
+                  ? "CHAT"
+                  : activeDrawer ===
+                      "documents"
+                    ? "DOCUMENTS"
+                    : activeDrawer ===
+                        "memory"
+                      ? "MEMORY"
+                      : activeDrawer ===
+                          "projects"
+                        ? "PROJECTS"
+                        : activeDrawer ===
+                            "tasks"
+                          ? "TASKS"
+                          : activeDrawer ===
+                              "tools"
+                            ? "TOOLS"
+                            : activeDrawer ===
+                                "guardian"
+                              ? "GUARDIAN"
+                              : "INSPECTOR"}
+              </div>
+            </div>
 
             <button
-              onClick={() =>
-                setMessages([])
+              className="drawer-close"
+              onClick={
+                closeDrawer
               }
+              title="Close"
             >
               ×
             </button>
-
           </div>
 
+          {/* CHAT DRAWER */}
 
-          <div className="response-body">
+          {activeDrawer ===
+            "chat" && (
+            <div className="chat-drawer-content">
+              <div
+                ref={
+                  responseScrollRef
+                }
+                className="chat-history"
+              >
+                {messages.length ===
+                  0 && (
+                  <div className="chat-empty">
+                    <div className="chat-empty-core">
+                      ◉
+                    </div>
 
-            {messages.map(
-              (item, index) => (
+                    <div className="chat-empty-title">
+                      GHOST ONLINE
+                    </div>
+
+                    <div className="chat-empty-text">
+                      Ask a question,
+                      upload a
+                      document, or
+                      tell GHOST to
+                      remember
+                      something.
+                    </div>
+                  </div>
+                )}
+
+                {messages.map(
+                  (
+                    item,
+                    index
+                  ) => (
+                    <div
+                      className={`message-card ${
+                        item.role ===
+                        "user"
+                          ? "user-message"
+                          : "ghost-message"
+                      }`}
+                      key={index}
+                    >
+                      <div className="message-meta">
+                        <span>
+                          {item.role ===
+                          "user"
+                            ? "YOU"
+                            : "GHOST"}
+                        </span>
+
+                        <span className="message-line" />
+                      </div>
+
+                      {item.role ===
+                      "assistant" ? (
+                        <div className="message-content">
+                          {item.content ? (
+                            renderGhostResponse(
+                              item.content
+                            )
+                          ) : (
+                            <div className="thinking-row">
+                              <span className="thinking-dot" />
+                              GHOST IS THINKING
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="user-content">
+                          {item.content}
+                        </div>
+                      )}
+
+                      {item.pages?.length >
+                        0 && (
+                        <div className="source-chips">
+                          <span className="source-label">
+                            SOURCES
+                          </span>
+
+                          {item.pages.map(
+                            (
+                              page
+                            ) => (
+                              <span
+                                className="source-chip"
+                                key={
+                                  page
+                                }
+                              >
+                                P.{page}
+                              </span>
+                            )
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )
+                )}
+              </div>
+
+              {/* CHAT ANSWER CONTROLS */}
+
+              {latestAssistant && (
+                <div className="answer-toolbar">
+                  <span className="answer-toolbar-title">
+                    RESPONSE VIEW
+                  </span>
+
+                  <div className="answer-toolbar-actions">
+                    <button
+                      onClick={() =>
+                        setAnswerMode(
+                          "minimized"
+                        )
+                      }
+                      title="Minimize answer"
+                    >
+                      —
+                    </button>
+
+                    <button
+                      onClick={() =>
+                        setAnswerMode(
+                          "float"
+                        )
+                      }
+                      title="Float answer"
+                    >
+                      ◇
+                    </button>
+
+                    <button
+                      onClick={() =>
+                        setAnswerMode(
+                          "fullscreen"
+                        )
+                      }
+                      title="Full screen answer"
+                    >
+                      ⛶
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <div className="chat-input-area">
+                <div className="chat-input-status">
+                  <span
+                    className={
+                      loading
+                        ? "status-pulse thinking"
+                        : "status-pulse ready"
+                    }
+                  />
+
+                  {loading
+                    ? "PROCESSING"
+                    : documentName
+                      ? `DOCUMENT · ${documentName}`
+                      : "READY"}
+                </div>
+
+                <div className="chat-input-row">
+                  <textarea
+                    value={message}
+                    onChange={(
+                      event
+                    ) =>
+                      setMessage(
+                        event.target
+                          .value
+                      )
+                    }
+                    onKeyDown={
+                      handleKeyDown
+                    }
+                    placeholder={
+                      documentName
+                        ? `Ask GHOST about ${documentName}...`
+                        : "Ask GHOST..."
+                    }
+                    disabled={
+                      loading
+                    }
+                    rows={2}
+                  />
+
+                  <button
+                    className="chat-send"
+                    onClick={
+                      sendMessage
+                    }
+                    disabled={
+                      loading ||
+                      !message.trim()
+                    }
+                  >
+                    ↗
+                  </button>
+                </div>
+
+                <div className="chat-actions">
+                  <button
+                    onClick={
+                      newChat
+                    }
+                    disabled={
+                      loading
+                    }
+                  >
+                    NEW CHAT
+                  </button>
+
+                  <button
+                    onClick={() =>
+                      setMessages(
+                        []
+                      )
+                    }
+                  >
+                    CLEAR
+                  </button>
+
+                  <button
+                    onClick={() =>
+                      fileInputRef.current?.click()
+                    }
+                  >
+                    UPLOAD
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* DOCUMENT DRAWER */}
+
+          {activeDrawer ===
+            "documents" && (
+            <div className="drawer-body">
+              <div className="panel-icon document-icon">
+                ▤
+              </div>
+
+              <div className="panel-title">
+                DOCUMENT INTELLIGENCE
+              </div>
+
+              <div className="panel-description">
+                Upload PDF, DOCX or TXT
+                files and make them
+                available to GHOST's
+                retrieval and whole-document
+                analysis pipeline.
+              </div>
+
+              <button
+                className="primary-action"
+                onClick={() =>
+                  fileInputRef.current?.click()
+                }
+                disabled={
+                  uploading
+                }
+              >
+                {uploading
+                  ? "INGESTING..."
+                  : "UPLOAD DOCUMENT"}
+              </button>
+
+              {documentName ? (
+                <div className="active-doc-card">
+                  <div className="card-kicker">
+                    ACTIVE DOCUMENT
+                  </div>
+
+                  <div className="active-doc-name">
+                    {documentName}
+                  </div>
+
+                  <div className="active-doc-status">
+                    <span />
+                    {uploadStatus ||
+                      "DOCUMENT READY · INDEXED"}
+                  </div>
+
+                  <button
+                    className="secondary-action"
+                    onClick={
+                      clearDocument
+                    }
+                  >
+                    CLEAR ACTIVE DOCUMENT
+                  </button>
+                </div>
+              ) : (
+                <div className="empty-panel">
+                  NO ACTIVE DOCUMENT
+                </div>
+              )}
+
+              <div className="drawer-stat-grid">
+                <div>
+                  <span>
+                    DOCUMENT NODES
+                  </span>
+                  <b>
+                    {
+                      nodeCounts.document
+                    }
+                  </b>
+                </div>
+
+                <div>
+                  <span>
+                    ACTIVE FILE
+                  </span>
+                  <b>
+                    {documentId
+                      ? "YES"
+                      : "NO"}
+                  </b>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* MEMORY DRAWER */}
+
+          {activeDrawer ===
+            "memory" && (
+            <div className="drawer-body">
+              <div className="panel-icon memory-icon">
+                ◈
+              </div>
+
+              <div className="panel-title">
+                PERSISTENT MEMORY
+              </div>
+
+              <div className="panel-description">
+                GHOST's persistent
+                knowledge layer stores
+                useful project context,
+                decisions, preferences
+                and facts.
+              </div>
+
+              <div className="big-stat">
+                <strong>
+                  {
+                    nodeCounts.memory
+                  }
+                </strong>
+                <span>
+                  MEMORY NODES
+                </span>
+              </div>
+
+              <button
+                className="secondary-action"
+                onClick={() =>
+                  focusType(
+                    "memory"
+                  )
+                }
+              >
+                FOCUS MEMORY NETWORK
+              </button>
+
+              <div className="info-block">
+                <div>
+                  STATUS
+                </div>
+                <strong>
+                  PERSISTENT
+                </strong>
+              </div>
+            </div>
+          )}
+
+          {/* PROJECT DRAWER */}
+
+          {activeDrawer ===
+            "projects" && (
+            <div className="drawer-body">
+              <div className="panel-icon project-icon">
+                ◇
+              </div>
+
+              <div className="panel-title">
+                PROJECT AWARENESS
+              </div>
+
+              <div className="panel-description">
+                Projects are represented
+                inside the GHOST knowledge
+                graph and can connect
+                memory, documents and
+                future tasks.
+              </div>
+
+              <div className="big-stat">
+                <strong>
+                  {
+                    nodeCounts.project
+                  }
+                </strong>
+                <span>
+                  PROJECT NODES
+                </span>
+              </div>
+
+              <button
+                className="secondary-action"
+                onClick={() =>
+                  focusType(
+                    "project"
+                  )
+                }
+              >
+                FOCUS PROJECT NETWORK
+              </button>
+            </div>
+          )}
+
+          {/* TASK DRAWER */}
+
+          {activeDrawer ===
+            "tasks" && (
+            <div className="drawer-body">
+              <div className="panel-icon task-icon">
+                ⊞
+              </div>
+
+              <div className="panel-title">
+                TASK SYSTEM
+              </div>
+
+              <div className="panel-description">
+                The task orchestration
+                layer is reserved for
+                future autonomous execution.
+              </div>
+
+              <div className="big-stat">
+                <strong>
+                  {nodeCounts.task}
+                </strong>
+                <span>
+                  TASK NODES
+                </span>
+              </div>
+
+              <div className="future-badge">
+                ORCHESTRATION · IN DEVELOPMENT
+              </div>
+            </div>
+          )}
+
+          {/* TOOLS DRAWER */}
+
+          {activeDrawer ===
+            "tools" && (
+            <div className="drawer-body">
+              <div className="panel-icon tool-icon">
+                ⌁
+              </div>
+
+              <div className="panel-title">
+                TOOL REGISTRY
+              </div>
+
+              <div className="panel-description">
+                GHOST's tool layer will
+                eventually connect approved
+                external actions to the
+                orchestrator.
+              </div>
+
+              <div className="big-stat">
+                <strong>
+                  {nodeCounts.tool}
+                </strong>
+                <span>
+                  TOOL NODES
+                </span>
+              </div>
+
+              <div className="future-badge">
+                TOOL EXECUTION · IN DEVELOPMENT
+              </div>
+            </div>
+          )}
+
+          {/* GUARDIAN DRAWER */}
+
+          {activeDrawer ===
+            "guardian" && (
+            <div className="drawer-body">
+              <div className="panel-icon guardian-icon">
+                ⛨
+              </div>
+
+              <div className="panel-title">
+                GUARDIAN
+              </div>
+
+              <div className="panel-description">
+                Security and permission
+                controls will govern
+                actions before GHOST can
+                execute external operations.
+              </div>
+
+              <div className="security-status">
+                <span className="security-dot" />
+                <div>
+                  <strong>
+                    READY
+                  </strong>
+                  <span>
+                    ACTION GATES ENABLED
+                    FOR FUTURE TOOLS
+                  </span>
+                </div>
+              </div>
+
+              <div className="future-badge guardian-badge">
+                SECURITY LAYER · PROTOTYPE
+              </div>
+            </div>
+          )}
+
+          {/* NODE INSPECTOR */}
+
+          {activeDrawer ===
+            "inspector" &&
+            selectedNode && (
+              <div className="drawer-body">
+                <div
+                  className="panel-icon"
+                  style={{
+                    color:
+                      NODE_COLORS[
+                        selectedNode.type
+                      ] ||
+                      NODE_COLORS.system,
+                  }}
+                >
+                  ◉
+                </div>
 
                 <div
-                  className={
-                    item.role ===
-                    "user"
-                      ? "chat-message user"
-                      : "chat-message assistant"
-                  }
-                  key={index}
+                  className="panel-type"
+                  style={{
+                    color:
+                      NODE_COLORS[
+                        selectedNode.type
+                      ] ||
+                      NODE_COLORS.system,
+                  }}
                 >
+                  {(
+                    selectedNode.type ||
+                    "system"
+                  ).toUpperCase()}
+                </div>
 
-                  <div className="message-role">
+                <div className="panel-title">
+                  {selectedNode.label ||
+                    "Unnamed node"}
+                </div>
 
-                    {item.role ===
-                    "user"
-                      ? "YOU"
-                      : "GHOST"}
+                <div className="panel-description">
+                  {selectedNode.description ||
+                    "GHOST knowledge node."}
+                </div>
 
+                <div className="inspector-data">
+                  <div>
+                    <span>
+                      NODE ID
+                    </span>
+                    <strong>
+                      {String(
+                        selectedNode.id ||
+                          "N/A"
+                      )}
+                    </strong>
                   </div>
 
                   <div>
-                    {item.content}
+                    <span>
+                      TYPE
+                    </span>
+                    <strong>
+                      {String(
+                        selectedNode.type ||
+                          "system"
+                      ).toUpperCase()}
+                    </strong>
                   </div>
 
-
-                  {item.pages &&
-                    item.pages.length >
-                      0 && (
-
-                    <div className="source-pages">
-
-                      SOURCES:{" "}
-
-                      {item.pages.join(
-                        ", "
-                      )}
-
-                    </div>
-
-                  )}
-
+                  <div>
+                    <span>
+                      ROOT NODE
+                    </span>
+                    <strong>
+                      {selectedNode.isRoot
+                        ? "YES"
+                        : "NO"}
+                    </strong>
+                  </div>
                 </div>
-
-              )
+              </div>
             )}
-
-          </div>
-
-        </div>
-
+        </aside>
       )}
 
+      {/* FULL SCREEN ANSWER */}
 
-      {/* ======================================================
-          COMMAND BAR
-      ====================================================== */}
+      {answerMode ===
+        "fullscreen" &&
+        latestAssistant && (
+          <section className="answer-overlay">
+            <div className="answer-overlay-inner">
+              <div className="answer-overlay-header">
+                <div>
+                  <div className="answer-kicker">
+                    GHOST // RESPONSE
+                  </div>
 
-      <div className="command-area">
+                  <div className="answer-title">
+                    FULL SCREEN ANALYSIS
+                  </div>
+                </div>
 
-        <div className="ready-label">
+                <div className="answer-overlay-actions">
+                  <button
+                    onClick={() =>
+                      setAnswerMode(
+                        "float"
+                      )
+                    }
+                    title="Float"
+                  >
+                    ◇
+                  </button>
+
+                  <button
+                    onClick={() =>
+                      setAnswerMode(
+                        "normal"
+                      )
+                    }
+                    title="Restore"
+                  >
+                    ↙
+                  </button>
+
+                  <button
+                    onClick={() =>
+                      setAnswerMode(
+                        "minimized"
+                      )
+                    }
+                    title="Minimize"
+                  >
+                    —
+                  </button>
+
+                  <button
+                    onClick={() =>
+                      setAnswerMode(
+                        "normal"
+                      )
+                    }
+                    title="Close"
+                  >
+                    ×
+                  </button>
+                </div>
+              </div>
+
+              <div className="answer-overlay-content">
+                {renderGhostResponse(
+                  latestAssistant.content
+                )}
+
+                {latestAssistant.pages
+                  ?.length > 0 && (
+                  <div className="overlay-sources">
+                    <span>
+                      SOURCE PAGES
+                    </span>
+
+                    {latestAssistant.pages.map(
+                      (page) => (
+                        <span
+                          key={page}
+                        >
+                          P.{page}
+                        </span>
+                      )
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
+        )}
+
+      {/* FLOATING ANSWER */}
+
+      {answerMode ===
+        "float" &&
+        latestAssistant && (
+          <section className="floating-answer">
+            <div className="floating-header">
+              <span>
+                GHOST // RESPONSE
+              </span>
+
+              <div>
+                <button
+                  onClick={() =>
+                    setAnswerMode(
+                      "minimized"
+                    )
+                  }
+                >
+                  —
+                </button>
+
+                <button
+                  onClick={() =>
+                    setAnswerMode(
+                      "fullscreen"
+                    )
+                  }
+                >
+                  ⛶
+                </button>
+
+                <button
+                  onClick={() =>
+                    setAnswerMode(
+                      "normal"
+                    )
+                  }
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+
+            <div className="floating-content">
+              {renderGhostResponse(
+                latestAssistant.content
+              )}
+            </div>
+          </section>
+        )}
+
+      {/* MINIMIZED ANSWER */}
+
+      {answerMode ===
+        "minimized" &&
+        latestAssistant && (
+          <button
+            className="minimized-answer"
+            onClick={() =>
+              setAnswerMode(
+                "float"
+              )
+            }
+          >
+            <span className="minimized-pulse" />
+            GHOST RESPONSE
+            <span>
+              ↗
+            </span>
+          </button>
+        )}
+
+      {/* HIDDEN FILE INPUT */}
+
+      <input
+        ref={fileInputRef}
+        className="hidden-file-input"
+        type="file"
+        accept=".pdf,.doc,.docx,.txt,application/pdf,text/plain,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        onChange={
+          handleFileChange
+        }
+      />
+
+      {/* COMMAND BAR */}
+
+      <section className="command-area">
+        <div className="command-status">
+          <span
+            className={
+              loading
+                ? "thinking"
+                : uploading
+                  ? "ingesting"
+                  : "ready"
+            }
+          >
+            ●
+          </span>
 
           {loading
-            ? "GHOST IS THINKING..."
-            : "GHOST IS READY"}
-
+            ? "GHOST IS THINKING"
+            : uploading
+              ? "GHOST IS INGESTING"
+              : "GHOST IS LISTENING"}
         </div>
 
-
         <div className="command-bar">
-
           <button
             className="command-icon"
-            onClick={focusFriday}
+            onClick={
+              focusGhost
+            }
             title="Center GHOST"
           >
             ◉
           </button>
 
-
           <textarea
             value={message}
             onChange={(event) =>
               setMessage(
-                event.target.value
+                event.target
+                  .value
               )
             }
             onKeyDown={
               handleKeyDown
             }
-            placeholder="Ask GHOST..."
+            placeholder={
+              documentName
+                ? `Ask GHOST about ${documentName}...`
+                : 'Ask GHOST...'
+            }
             disabled={loading}
             rows={1}
           />
 
+          <button
+            className="upload-command"
+            onClick={() =>
+              fileInputRef.current?.click()
+            }
+            disabled={
+              uploading
+            }
+            title="Upload document"
+          >
+            +
+          </button>
 
           <button
             className="send-button"
-            onClick={sendMessage}
+            onClick={
+              sendMessage
+            }
             disabled={
               loading ||
               !message.trim()
             }
+            title="Send"
           >
             ↗
           </button>
-
         </div>
 
-
         <div className="command-links">
+          <button
+            onClick={() =>
+              openDrawer("chat")
+            }
+          >
+            CHAT
+          </button>
+
+          <span>·</span>
+
+          <button
+            onClick={() =>
+              openDrawer(
+                "documents"
+              )
+            }
+          >
+            DOCUMENTS
+          </button>
+
+          <span>·</span>
 
           <button
             onClick={newChat}
             disabled={loading}
           >
-            NEW
+            NEW CHAT
           </button>
 
-          <span>|</span>
+          <span>·</span>
 
           <button
             onClick={() =>
@@ -1061,77 +2619,47 @@ function App() {
             CLEAR
           </button>
 
-          <span>|</span>
+          <span>·</span>
 
           <button
-            onClick={() =>
-              setSelectedNode(
-                visualGraph.nodes.find(
-                  (node) =>
-                    node.id ===
-                    "memory-root"
-                )
-              )
+            onClick={
+              resetLayout
             }
           >
-            MEMORY
+            RESET NEURAL MAP
           </button>
-
-          <span>|</span>
-
-          <button
-            onClick={() =>
-              setSelectedNode(
-                visualGraph.nodes.find(
-                  (node) =>
-                    node.id ===
-                    "project-ghost"
-                )
-              )
-            }
-          >
-            PROJECTS
-          </button>
-
         </div>
+      </section>
 
+      {/* FOOTER */}
+
+      <div className="footer-left">
+        GHOST · NEURAL INTERFACE
       </div>
 
-
-      {/* ======================================================
-          BOTTOM RIGHT
-      ====================================================== */}
-
-      <div className="backend-status">
-
+      <div className="footer-right">
         <span
           className={
             backendOnline
-              ? "status-dot online"
-              : "status-dot offline"
+              ? "footer-online"
+              : ""
           }
-        />
+        >
+          ●
+        </span>
 
         {backendOnline
-          ? "BACKEND CONNECTED"
-          : "BACKEND OFFLINE"}
+          ? " BACKEND CONNECTED"
+          : " BACKEND OFFLINE"}
 
+        <span className="footer-divider">
+          /
+        </span>
+
+        {activeMessageCount} REQUESTS
       </div>
-
-
-      {/* ======================================================
-          VERSION
-      ====================================================== */}
-
-      <div className="version">
-
-        GHOST CORE v0.1
-
-      </div>
-
-    </div>
+    </main>
   );
 }
-
 
 export default App;
