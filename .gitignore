@@ -1,0 +1,17 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+.env
+.cache/
+.pytest_cache/
+backend/data/
+uploads/
+frontend/node_modules/
+frontend/dist/
+
+legacy/
+
+# Local backups
+*_backup.py
+backend_before_ghost_rename/
