@@ -1,13 +1,17 @@
 import asyncio
 import logging
 
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, Request
 from pypdf import PdfReader
 from io import BytesIO
 from docx import Document
 import uuid
 
 from backend.core.config import get_upload_limits
+from backend.core.security import (
+    get_rate_limits,
+    rate_limiter,
+)
 from backend.core.services import (
     document_processor,
     document_retriever,
@@ -112,7 +116,42 @@ async def delete_document(document_id: str):
 
 
 @router.post("/upload")
-async def upload_file(file: UploadFile = File(...)):
+async def upload_file(
+    http_request: Request,
+    file: UploadFile = File(...),
+):
+
+    # ----------------------------------------------------
+    # Per-session upload rate limit
+    # ----------------------------------------------------
+
+    rate_limits = get_rate_limits()
+
+    session_token = getattr(
+        http_request.state,
+        "session_token",
+        "",
+    )
+
+    allowed, retry_after = rate_limiter.check(
+        f"upload:{session_token}",
+        rate_limits["upload"],
+    )
+
+    if not allowed:
+
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                "Upload rate limit exceeded. "
+                "Slow down."
+            ),
+            headers={
+                "Retry-After": str(
+                    int(retry_after),
+                ),
+            },
+        )
 
     limits = get_upload_limits()
 

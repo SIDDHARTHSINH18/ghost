@@ -1,7 +1,8 @@
 """
 API shell tests: health, validation, routing errors.
 No network calls — every tested path fails before
-the provider is contacted.
+the provider is contacted. M2: /api routes now use
+the authenticated client; public routes stay open.
 """
 
 import io
@@ -14,7 +15,7 @@ from backend.main import app
 client = TestClient(app)
 
 
-class TestHealth:
+class TestPublicRoutes:
 
     def test_health_ok(self):
         response = client.get("/health")
@@ -38,16 +39,22 @@ class TestHealth:
 
 class TestChatValidation:
 
-    def test_empty_message_rejected(self):
-        response = client.post(
+    def test_empty_message_rejected(
+        self,
+        auth_client,
+    ):
+        response = auth_client.post(
             "/api/chat",
             json={"message": "   "},
         )
 
         assert response.status_code == 400
 
-    def test_unknown_provider_rejected(self):
-        response = client.post(
+    def test_unknown_provider_rejected(
+        self,
+        auth_client,
+    ):
+        response = auth_client.post(
             "/api/chat",
             json={
                 "message": "hello there",
@@ -57,8 +64,11 @@ class TestChatValidation:
 
         assert response.status_code == 404
 
-    def test_missing_document_rejected(self):
-        response = client.post(
+    def test_missing_document_rejected(
+        self,
+        auth_client,
+    ):
+        response = auth_client.post(
             "/api/chat",
             json={
                 "message": "what is on page 5?",
@@ -71,8 +81,11 @@ class TestChatValidation:
 
 class TestUploadValidation:
 
-    def test_unsupported_file_type(self):
-        response = client.post(
+    def test_unsupported_file_type(
+        self,
+        auth_client,
+    ):
+        response = auth_client.post(
             "/api/upload",
             files={
                 "file": (
@@ -85,8 +98,11 @@ class TestUploadValidation:
 
         assert response.status_code == 400
 
-    def test_empty_text_file_rejected(self):
-        response = client.post(
+    def test_empty_text_file_rejected(
+        self,
+        auth_client,
+    ):
+        response = auth_client.post(
             "/api/upload",
             files={
                 "file": (
@@ -102,14 +118,17 @@ class TestUploadValidation:
 
 class TestGraph:
 
-    def test_graph_memory_labels_not_content(self):
+    def test_graph_memory_labels_not_content(
+        self,
+        auth_client,
+    ):
         from backend.core.services import memory_service
 
         memory_service.add_memory(
             content="GRAPHTEST secret personal fact alpha",
         )
 
-        response = client.get("/api/graph")
+        response = auth_client.get("/api/graph")
 
         assert response.status_code == 200
 

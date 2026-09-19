@@ -5,20 +5,15 @@ validation, and configurable limits.
 Explicitly includes a no-arbitrary-count-limit test:
 many documents must upload successfully while real
 resource limits (file size, total storage) still apply.
+M2: requests now go through the authenticated client.
 """
 
 import io
 
 import pytest
 
-from fastapi.testclient import TestClient
-
 from backend.core.config import get_upload_limits
 from backend.core.services import documents
-from backend.main import app
-
-
-client = TestClient(app)
 
 
 @pytest.fixture(autouse=True)
@@ -29,10 +24,11 @@ def clean_documents():
 
 
 def upload_txt(
+    auth_client,
     name: str,
     text: str,
 ):
-    return client.post(
+    return auth_client.post(
         "/api/upload",
         files={
             "file": (
@@ -46,8 +42,12 @@ def upload_txt(
 
 class TestDocumentListing:
 
-    def test_upload_then_list_metadata(self):
+    def test_upload_then_list_metadata(
+        self,
+        auth_client,
+    ):
         response = upload_txt(
+            auth_client,
             "notes.txt",
             "alpha beta gamma delta epsilon",
         )
@@ -56,7 +56,7 @@ class TestDocumentListing:
 
         document_id = response.json()["document_id"]
 
-        listing = client.get("/api/documents")
+        listing = auth_client.get("/api/documents")
 
         assert listing.status_code == 200
 
@@ -83,8 +83,13 @@ class TestDocumentListing:
             not in listing.text
         )
 
-    def test_empty_listing(self):
-        body = client.get("/api/documents").json()
+    def test_empty_listing(
+        self,
+        auth_client,
+    ):
+        body = auth_client.get(
+            "/api/documents",
+        ).json()
 
         assert body == {
             "documents": [],
@@ -95,15 +100,19 @@ class TestDocumentListing:
 
 class TestDocumentDeletion:
 
-    def test_delete_verifies_store_is_clean(self):
+    def test_delete_verifies_store_is_clean(
+        self,
+        auth_client,
+    ):
         created = upload_txt(
+            auth_client,
             "gone.txt",
             "some meaningful content for deletion test",
         )
 
         document_id = created.json()["document_id"]
 
-        response = client.delete(
+        response = auth_client.delete(
             f"/api/documents/{document_id}",
         )
 
@@ -115,13 +124,15 @@ class TestDocumentDeletion:
         assert body["verified"] is True
 
         # Gone from the listing...
-        listing = client.get("/api/documents").json()
+        listing = (
+            auth_client.get("/api/documents").json()
+        )
 
         assert listing["total"] == 0
 
         # ...and gone from the active store: chat with
         # the deleted id must 404.
-        chat = client.post(
+        chat = auth_client.post(
             "/api/chat",
             json={
                 "message": "what is on page 5?",
@@ -131,8 +142,11 @@ class TestDocumentDeletion:
 
         assert chat.status_code == 404
 
-    def test_delete_unknown_document_404(self):
-        response = client.delete(
+    def test_delete_unknown_document_404(
+        self,
+        auth_client,
+    ):
+        response = auth_client.delete(
             "/api/documents/no-such-id",
         )
 
@@ -141,8 +155,11 @@ class TestDocumentDeletion:
 
 class TestUploadValidation:
 
-    def test_unsupported_extension_400(self):
-        response = client.post(
+    def test_unsupported_extension_400(
+        self,
+        auth_client,
+    ):
+        response = auth_client.post(
             "/api/upload",
             files={
                 "file": (
@@ -158,7 +175,11 @@ class TestUploadValidation:
             response.json()["detail"]
         )
 
-    def test_extension_list_configurable(self, monkeypatch):
+    def test_extension_list_configurable(
+        self,
+        auth_client,
+        monkeypatch,
+    ):
         monkeypatch.setenv(
             "GHOST_ALLOWED_EXTENSIONS",
             ".txt",
@@ -169,14 +190,12 @@ class TestUploadValidation:
         assert limits.allowed_extensions == (".txt",)
 
         # .pdf now rejected by configuration.
-        pdf_response = client.post(
+        pdf_response = auth_client.post(
             "/api/upload",
             files={
                 "file": (
                     "doc.pdf",
-                    __import__("io").BytesIO(
-                        b"%PDF-1.4 fake"
-                    ),
+                    io.BytesIO(b"%PDF-1.4 fake"),
                     "application/pdf",
                 ),
             },
@@ -184,8 +203,12 @@ class TestUploadValidation:
 
         assert pdf_response.status_code == 400
 
-    def test_no_readable_text_400(self):
+    def test_no_readable_text_400(
+        self,
+        auth_client,
+    ):
         response = upload_txt(
+            auth_client,
             "blank.txt",
             "   ",
         )
@@ -198,13 +221,18 @@ class TestUploadValidation:
 
 class TestConfigurableLimits:
 
-    def test_per_file_size_limit_413(self, monkeypatch):
+    def test_per_file_size_limit_413(
+        self,
+        auth_client,
+        monkeypatch,
+    ):
         monkeypatch.setenv(
             "GHOST_MAX_UPLOAD_MB",
             "0",
         )
 
         response = upload_txt(
+            auth_client,
             "tiny.txt",
             "still too big for a zero limit",
         )
@@ -214,13 +242,18 @@ class TestConfigurableLimits:
             response.json()["detail"]
         )
 
-    def test_total_storage_limit_413(self, monkeypatch):
+    def test_total_storage_limit_413(
+        self,
+        auth_client,
+        monkeypatch,
+    ):
         monkeypatch.setenv(
             "GHOST_MAX_TOTAL_STORAGE_MB",
             "0",
         )
 
         response = upload_txt(
+            auth_client,
             "tiny.txt",
             "content",
         )
@@ -231,7 +264,10 @@ class TestConfigurableLimits:
             in response.json()["detail"]
         )
 
-    def test_invalid_env_falls_back_to_default(self, monkeypatch):
+    def test_invalid_env_falls_back_to_default(
+        self,
+        monkeypatch,
+    ):
         monkeypatch.setenv(
             "GHOST_MAX_UPLOAD_MB",
             "not-a-number",
@@ -247,7 +283,10 @@ class TestConfigurableLimits:
 
 class TestNoDocumentCountLimit:
 
-    def test_many_documents_all_upload(self):
+    def test_many_documents_all_upload(
+        self,
+        auth_client,
+    ):
         """
         The old design risk was an arbitrary "maximum N
         documents" rule. Fifteen documents (well above
@@ -258,6 +297,7 @@ class TestNoDocumentCountLimit:
         for index in range(15):
 
             response = upload_txt(
+                auth_client,
                 f"doc{index}.txt",
                 f"document number {index} with content",
             )
@@ -267,6 +307,8 @@ class TestNoDocumentCountLimit:
                 f"{response.text}"
             )
 
-        listing = client.get("/api/documents").json()
+        listing = (
+            auth_client.get("/api/documents").json()
+        )
 
         assert listing["total"] == 15

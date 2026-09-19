@@ -1,20 +1,15 @@
 """
 M1 API tests: memory listing and deletion, with
 post-delete verification against persistent storage.
+M2: requests now go through the authenticated client.
 """
 
 import os
 
 import pytest
 
-from fastapi.testclient import TestClient
-
 from backend.core.memory import MemoryService
 from backend.core.services import memory_service
-from backend.main import app
-
-
-client = TestClient(app)
 
 
 @pytest.fixture(autouse=True)
@@ -36,7 +31,10 @@ def fresh_service() -> MemoryService:
 
 class TestMemoryListing:
 
-    def test_list_returns_metadata_and_content(self):
+    def test_list_returns_metadata_and_content(
+        self,
+        auth_client,
+    ):
         memory_service.add_memory(
             content="My project is called GHOST.",
             memory_type="project",
@@ -46,7 +44,7 @@ class TestMemoryListing:
             source="user",
         )
 
-        response = client.get("/api/memory")
+        response = auth_client.get("/api/memory")
 
         assert response.status_code == 200
 
@@ -71,8 +69,11 @@ class TestMemoryListing:
             == "My project is called GHOST."
         )
 
-    def test_empty_store(self):
-        response = client.get("/api/memory")
+    def test_empty_store(
+        self,
+        auth_client,
+    ):
+        response = auth_client.get("/api/memory")
 
         assert response.status_code == 200
         assert response.json() == {
@@ -83,12 +84,15 @@ class TestMemoryListing:
 
 class TestMemoryDeletion:
 
-    def test_delete_removes_and_verifies(self):
+    def test_delete_removes_and_verifies(
+        self,
+        auth_client,
+    ):
         memory = memory_service.add_memory(
             content="temporary memory for deletion",
         )
 
-        response = client.delete(
+        response = auth_client.delete(
             f"/api/memory/{memory['id']}",
         )
 
@@ -100,7 +104,9 @@ class TestMemoryDeletion:
         assert body["verified"] is True
 
         # Gone from the live API...
-        listing = client.get("/api/memory").json()
+        listing = (
+            auth_client.get("/api/memory").json()
+        )
 
         assert listing["total"] == 0
 
@@ -110,18 +116,24 @@ class TestMemoryDeletion:
             is None
         )
 
-    def test_delete_unknown_memory_404(self):
-        response = client.delete(
+    def test_delete_unknown_memory_404(
+        self,
+        auth_client,
+    ):
+        response = auth_client.delete(
             "/api/memory/not-a-real-id",
         )
 
         assert response.status_code == 404
 
-    def test_clear_all(self):
+    def test_clear_all(
+        self,
+        auth_client,
+    ):
         memory_service.add_memory(content="one")
         memory_service.add_memory(content="two")
 
-        response = client.delete("/api/memory")
+        response = auth_client.delete("/api/memory")
 
         assert response.status_code == 200
 
@@ -131,6 +143,8 @@ class TestMemoryDeletion:
         assert body["verified"] is True
 
         assert (
-            client.get("/api/memory").json()["total"]
+            auth_client.get("/api/memory").json()[
+                "total"
+            ]
             == 0
         )

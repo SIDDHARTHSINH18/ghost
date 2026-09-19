@@ -7,6 +7,7 @@ const API_URL = "http://127.0.0.1:8000";
 
 const LAYOUT_KEY = "ghost-spatial-layout-v2";
 const ACTIVE_DOCUMENT_KEY = "ghost-active-document-v2";
+const AUTH_TOKEN_KEY = "ghost-auth-token-v1";
 
 const NODE_COLORS = {
   ghost: "#eaffff",
@@ -561,6 +562,29 @@ function renderGhostResponse(text = "") {
 }
 
 function App() {
+  const [authStatus, setAuthStatus] =
+    useState("checking");
+
+  const [authToken, setAuthToken] =
+    useState(() => {
+      try {
+        return sessionStorage.getItem(
+          AUTH_TOKEN_KEY
+        ) || "";
+      } catch {
+        return "";
+      }
+    });
+
+  const [loginPassword, setLoginPassword] =
+    useState("");
+
+  const [loginError, setLoginError] =
+    useState("");
+
+  const [loginLoading, setLoginLoading] =
+    useState(false);
+
   const graphRef =
     useRef(null);
 
@@ -646,6 +670,208 @@ function App() {
       ? "THINKING"
       : "LISTENING";
 
+  function clearAuthSession() {
+    try {
+      sessionStorage.removeItem(
+        AUTH_TOKEN_KEY
+      );
+    } catch {
+      // Best effort.
+    }
+
+    setAuthToken("");
+    setAuthStatus("unauthenticated");
+    setLoginPassword("");
+  }
+
+  function handleSessionExpired() {
+    clearAuthSession();
+    setLoginError(
+      "Your GHOST session expired. Please log in again."
+    );
+  }
+
+  async function authFetch(url, options = {}) {
+    if (!authToken) {
+      throw new Error(
+        "GHOST authentication is required."
+      );
+    }
+
+    const headers = new Headers(
+      options.headers || {}
+    );
+
+    headers.set(
+      "Authorization",
+      `Bearer ${authToken}`
+    );
+
+    const response = await fetch(
+      url,
+      {
+        ...options,
+        headers,
+      }
+    );
+
+    if (response.status === 401) {
+      handleSessionExpired();
+    }
+
+    return response;
+  }
+
+  async function verifyStoredSession(token) {
+    try {
+      const response = await fetch(
+        `${API_URL}/api/auth/session`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          "Stored session is no longer valid."
+        );
+      }
+
+      setAuthToken(token);
+      setAuthStatus("authenticated");
+      setLoginError("");
+    } catch {
+      try {
+        sessionStorage.removeItem(
+          AUTH_TOKEN_KEY
+        );
+      } catch {
+        // Best effort.
+      }
+
+      setAuthToken("");
+      setAuthStatus("unauthenticated");
+    }
+  }
+
+  async function login() {
+    const password = loginPassword.trim();
+
+    if (!password || loginLoading) {
+      return;
+    }
+
+    setLoginLoading(true);
+    setLoginError("");
+
+    try {
+      const response = await fetch(
+        `${API_URL}/api/auth/login`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type":
+              "application/json",
+          },
+          body: JSON.stringify({
+            password,
+          }),
+        }
+      );
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok || !data.token) {
+        throw new Error(
+          data.detail ||
+            "Authentication failed."
+        );
+      }
+
+      try {
+        sessionStorage.setItem(
+          AUTH_TOKEN_KEY,
+          data.token
+        );
+      } catch {
+        throw new Error(
+          "GHOST could not create a browser session."
+        );
+      }
+
+      setAuthToken(data.token);
+      setAuthStatus("authenticated");
+      setLoginPassword("");
+      setLoginError("");
+    } catch (error) {
+      setLoginError(
+        error.message ||
+          "Authentication failed."
+      );
+    } finally {
+      setLoginLoading(false);
+    }
+  }
+
+  async function logout() {
+    try {
+      if (authToken) {
+        await fetch(
+          `${API_URL}/api/auth/session`,
+          {
+            method: "DELETE",
+            headers: {
+              Authorization: `Bearer ${authToken}`,
+            },
+          }
+        );
+      }
+    } catch (error) {
+      console.error(
+        "GHOST logout error:",
+        error
+      );
+    } finally {
+      clearAuthSession();
+    }
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function restoreSession() {
+      let token = "";
+
+      try {
+        token =
+          sessionStorage.getItem(
+            AUTH_TOKEN_KEY
+          ) || "";
+      } catch {
+        token = "";
+      }
+
+      if (!token) {
+        if (!cancelled) {
+          setAuthStatus("unauthenticated");
+        }
+        return;
+      }
+
+      if (!cancelled) {
+        await verifyStoredSession(token);
+      }
+    }
+
+    restoreSession();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   useEffect(() => {
     function handleResize() {
       setViewport({
@@ -669,6 +895,10 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (authStatus !== "authenticated") {
+      return undefined;
+    }
+
     loadGraph();
 
     const interval =
@@ -679,7 +909,7 @@ function App() {
 
     return () =>
       clearInterval(interval);
-  }, [loading]);
+  }, [loading, authStatus]);
 
   useEffect(() => {
     if (
@@ -711,7 +941,7 @@ function App() {
   async function loadGraph() {
     try {
       const response =
-        await fetch(
+        await authFetch(
           `${API_URL}/api/graph`
         );
 
@@ -757,7 +987,7 @@ function App() {
 
     try {
       const response =
-        await fetch(
+        await authFetch(
           `${API_URL}/api/memory`,
         );
 
@@ -796,7 +1026,7 @@ function App() {
 
     try {
       const response =
-        await fetch(
+        await authFetch(
           `${API_URL}/api/memory/${memoryId}`,
           {
             method: "DELETE",
@@ -831,7 +1061,7 @@ function App() {
 
     try {
       const response =
-        await fetch(
+        await authFetch(
           `${API_URL}/api/memory`,
           {
             method: "DELETE",
@@ -864,7 +1094,7 @@ function App() {
 
     try {
       const response =
-        await fetch(
+        await authFetch(
           `${API_URL}/api/documents`,
         );
 
@@ -903,7 +1133,7 @@ function App() {
 
     try {
       const response =
-        await fetch(
+        await authFetch(
           `${API_URL}/api/documents/${documentIdToRemove}`,
           {
             method: "DELETE",
@@ -1044,7 +1274,7 @@ function App() {
       );
 
       const response =
-        await fetch(
+        await authFetch(
           `${API_URL}/api/upload`,
           {
             method: "POST",
@@ -1190,7 +1420,7 @@ function App() {
 
     try {
       const response =
-        await fetch(
+        await authFetch(
           `${API_URL}/api/chat`,
           {
             method: "POST",
@@ -1539,6 +1769,172 @@ function App() {
       memoryItems,
     );
 
+  if (authStatus === "checking") {
+    return (
+      <main
+        style={{
+          minHeight: "100vh",
+          background: "#02070b",
+          color: "#d9f7ff",
+          display: "grid",
+          placeItems: "center",
+          fontFamily: "Inter, Segoe UI, sans-serif",
+          letterSpacing: "0.16em",
+        }}
+      >
+        VERIFYING GHOST SESSION...
+      </main>
+    );
+  }
+
+  if (authStatus !== "authenticated") {
+    return (
+      <main
+        style={{
+          minHeight: "100vh",
+          background: "#02070b",
+          color: "#d9f7ff",
+          display: "grid",
+          placeItems: "center",
+          padding: "24px",
+          fontFamily: "Inter, Segoe UI, sans-serif",
+          position: "relative",
+          overflow: "hidden",
+        }}
+      >
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            backgroundImage: "linear-gradient(rgba(0,229,255,0.035) 1px, transparent 1px), linear-gradient(90deg, rgba(0,229,255,0.035) 1px, transparent 1px)",
+            backgroundSize: "42px 42px",
+            pointerEvents: "none",
+          }}
+        />
+
+        <section
+          style={{
+            width: "min(420px, 100%)",
+            border: "1px solid rgba(0,229,255,0.28)",
+            background: "rgba(3,12,18,0.92)",
+            boxShadow: "0 0 50px rgba(0,229,255,0.08)",
+            padding: "34px",
+            position: "relative",
+            zIndex: 1,
+          }}
+        >
+          <div
+            style={{
+              color: "#00e5ff",
+              fontSize: "12px",
+              letterSpacing: "0.28em",
+              marginBottom: "12px",
+            }}
+          >
+            GHOST // ACCESS
+          </div>
+
+          <h1
+            style={{
+              margin: 0,
+              fontSize: "42px",
+              letterSpacing: "0.18em",
+              fontWeight: 500,
+            }}
+          >
+            G.H.O.S.T.
+          </h1>
+
+          <p
+            style={{
+              color: "rgba(190,225,238,0.68)",
+              lineHeight: 1.6,
+              margin: "12px 0 28px",
+              fontSize: "13px",
+            }}
+          >
+            PERSONAL AI OPERATING SYSTEM
+            <br />
+            AUTHENTICATED SESSION REQUIRED
+          </p>
+
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              login();
+            }}
+          >
+            <label
+              style={{
+                display: "block",
+                fontSize: "11px",
+                letterSpacing: "0.18em",
+                color: "rgba(190,225,238,0.65)",
+                marginBottom: "8px",
+              }}
+            >
+              GHOST PASSPHRASE
+            </label>
+
+            <input
+              type="password"
+              value={loginPassword}
+              onChange={(event) => {
+                setLoginPassword(event.target.value);
+                setLoginError("");
+              }}
+              autoFocus
+              autoComplete="current-password"
+              placeholder="Enter passphrase"
+              disabled={loginLoading}
+              style={{
+                width: "100%",
+                boxSizing: "border-box",
+                background: "rgba(0,0,0,0.28)",
+                border: "1px solid rgba(0,229,255,0.22)",
+                color: "#eaffff",
+                padding: "14px 15px",
+                outline: "none",
+                fontSize: "14px",
+              }}
+            />
+
+            {loginError && (
+              <div
+                style={{
+                  marginTop: "12px",
+                  color: "#ff7d8d",
+                  fontSize: "12px",
+                  lineHeight: 1.5,
+                }}
+              >
+                {loginError}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={loginLoading || !loginPassword.trim()}
+              style={{
+                width: "100%",
+                marginTop: "18px",
+                padding: "13px 16px",
+                border: "1px solid rgba(0,229,255,0.45)",
+                background: loginLoading ? "rgba(0,229,255,0.08)" : "rgba(0,229,255,0.13)",
+                color: "#dffcff",
+                cursor: loginLoading ? "wait" : "pointer",
+                letterSpacing: "0.18em",
+                fontSize: "11px",
+              }}
+            >
+              {loginLoading ? "AUTHENTICATING..." : "ENTER GHOST"}
+            </button>
+          </form>
+        </section>
+      </main>
+    );
+  }
+
   return (
     <main className="ghost-app">
       <div className="ambient-grid" />
@@ -1558,6 +1954,26 @@ function App() {
         </div>
 
         <div className="brand-rule" />
+
+        <button
+          type="button"
+          onClick={logout}
+          style={{
+            position: "absolute",
+            right: "28px",
+            top: "22px",
+            background: "transparent",
+            border: "1px solid rgba(0,229,255,0.22)",
+            color: "rgba(190,225,238,0.72)",
+            padding: "8px 11px",
+            fontSize: "10px",
+            letterSpacing: "0.14em",
+            cursor: "pointer",
+          }}
+          title="Log out of GHOST"
+        >
+          LOCK / LOGOUT
+        </button>
       </header>
 
       {/* STATUS */}

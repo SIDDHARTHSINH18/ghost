@@ -1,11 +1,15 @@
 import logging
 import re
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from backend.core.orchestrator import Orchestrator
+from backend.core.security import (
+    get_rate_limits,
+    rate_limiter,
+)
 from backend.core.services import (
     context_optimizer,
     document_retriever,
@@ -30,6 +34,40 @@ router = APIRouter(
     prefix="/api",
     tags=["Chat"],
 )
+
+
+# ============================================================
+# UNTRUSTED CONTENT DELIMITERS (M2, threat T3 layer 1)
+#
+# Document and memory text is data, never instructions.
+# It is wrapped in explicit markers and any literal
+# closing marker inside the content is escaped, so
+# content cannot break out of the delimiters.
+# ============================================================
+
+UNTRUSTED_OPEN = "<untrusted_content>"
+
+UNTRUSTED_CLOSE = "</untrusted_content>"
+
+UNTRUSTED_ESCAPED_CLOSE = "</untrusted_content_escaped>"
+
+
+def escape_untrusted(text: str) -> str:
+
+    return str(text).replace(
+        UNTRUSTED_CLOSE,
+        UNTRUSTED_ESCAPED_CLOSE,
+    )
+
+
+def wrap_untrusted(label: str, text: str) -> str:
+
+    return (
+        f"{UNTRUSTED_OPEN}\n"
+        f"{label}\n"
+        f"{escape_untrusted(text)}\n"
+        f"{UNTRUSTED_CLOSE}"
+    )
 
 
 # ============================================================
@@ -869,6 +907,7 @@ def build_request_messages(
 @router.post("/chat")
 async def chat(
     request: ChatRequest,
+    http_request: Request,
 ):
 
     # ========================================================
@@ -883,6 +922,39 @@ async def chat(
         raise HTTPException(
             status_code=400,
             detail="Message cannot be empty.",
+        )
+
+    # ========================================================
+    # PER-SESSION CHAT RATE LIMIT
+    # (tighter than the general middleware cap)
+    # ========================================================
+
+    limits = get_rate_limits()
+
+    session_token = getattr(
+        http_request.state,
+        "session_token",
+        "",
+    )
+
+    allowed, retry_after = rate_limiter.check(
+        f"chat:{session_token}",
+        limits["chat"],
+    )
+
+    if not allowed:
+
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                "Chat rate limit exceeded. "
+                "Slow down."
+            ),
+            headers={
+                "Retry-After": str(
+                    int(retry_after),
+                ),
+            },
         )
 
     # ========================================================
@@ -1079,10 +1151,7 @@ async def chat(
 
                 memory_section = (
                     "\n\n"
-                    "RELEVANT GHOST MEMORY:\n"
-                    "--------------------------------\n"
-                    f"{memory_context}\n"
-                    "--------------------------------\n"
+                    f"{wrap_untrusted('Source: GHOST long-term memory', memory_context)}\n"
                     "Use this memory only when it is "
                     "relevant to the current request.\n"
                 )
@@ -1106,7 +1175,7 @@ async def chat(
                 "DOCUMENT-LEVEL UNDERSTANDING:\n"
                 "--------------------------------\n"
 
-                f"{document_summary}\n"
+                f"{wrap_untrusted('Source: uploaded document (whole-document summary)', document_summary)}\n"
 
                 "--------------------------------\n\n"
 
@@ -1289,10 +1358,7 @@ async def chat(
 
                         memory_section = (
                             "\n\n"
-                            "RELEVANT GHOST MEMORY:\n"
-                            "--------------------------------\n"
-                            f"{memory_context}\n"
-                            "--------------------------------\n"
+                            f"{wrap_untrusted('Source: GHOST long-term memory', memory_context)}\n"
                             "Use memory only when it is "
                             "relevant to the user's question. "
                             "Do not use memory to replace "
@@ -1314,7 +1380,7 @@ async def chat(
                         "EXACT PAGE CONTEXT:\n"
                         "================================\n"
 
-                        f"{selected_context}\n"
+                        f"{wrap_untrusted(f'Source: uploaded document, page {requested_page}', selected_context)}\n"
 
                         "================================\n\n"
 
@@ -1452,10 +1518,7 @@ async def chat(
 
                     memory_section = (
                         "\n\n"
-                        "RELEVANT GHOST MEMORY:\n"
-                        "--------------------------------\n"
-                        f"{memory_context}\n"
-                        "--------------------------------\n"
+                        f"{wrap_untrusted('Source: GHOST long-term memory', memory_context)}\n"
                         "Use this memory only when it "
                         "adds relevant continuity. "
                         "The uploaded document remains "
@@ -1476,7 +1539,7 @@ async def chat(
                     "RELEVANT DOCUMENT CONTEXT:\n"
                     "--------------------------------\n"
 
-                    f"{selected_context}\n"
+                    f"{wrap_untrusted('Source: uploaded document (relevant sections)', selected_context)}\n"
 
                     "--------------------------------\n\n"
 
@@ -1527,7 +1590,7 @@ async def chat(
                 "RELEVANT LONG-TERM MEMORY:\n"
                 "--------------------------------\n"
 
-                f"{memory_context}\n"
+                f"{wrap_untrusted('Source: GHOST long-term memory', memory_context)}\n"
 
                 "--------------------------------\n\n"
 
@@ -1627,23 +1690,11 @@ async def chat(
                 return
 
             # ------------------------------------------------
-            # Send source metadata first
+            # Source pages are delivered via the
+            # X-Ghost-Sources response header (M2) — the
+            # old in-band __SOURCES__ string could be
+            # spoofed by document content (threat T7).
             # ------------------------------------------------
-
-            if (
-                use_document
-                and retrieved_pages
-            ):
-
-                yield (
-                    "__SOURCES__:"
-                    f"{','.join(
-                        map(
-                            str,
-                            retrieved_pages,
-                        )
-                    )}\n"
-                )
 
             # ------------------------------------------------
             # Generate AI response
@@ -1713,7 +1764,24 @@ async def chat(
     # RETURN STREAM
     # ========================================================
 
+    # Citation pages travel in a response header the
+    # document content cannot influence.
+    stream_headers = {}
+
+    if (
+        use_document
+        and retrieved_pages
+    ):
+
+        stream_headers["X-Ghost-Sources"] = ",".join(
+            map(
+                str,
+                retrieved_pages,
+            )
+        )
+
     return StreamingResponse(
         generate_response(),
         media_type="text/plain",
+        headers=stream_headers,
     )
