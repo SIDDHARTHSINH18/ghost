@@ -10,7 +10,7 @@ Every claim below cites the file and line that evidences it. Nothing here is ass
 
 The repository contains **two disconnected applications** plus a large set of **empty placeholder packages** named after the GHOST vision:
 
-1. **Legacy local-model chat app** — `app.py` + root `orchestrator.py`. A Gradio UI ("DeepSeek AI Orchestrator") that loads local Hugging Face transformers models selected from `models.json`. It is self-contained and does not touch the `backend/` package at all.
+1. **Legacy local-model chat app** — `legacy/gradio-app/app.py` + `legacy/gradio-app/orchestrator.py`. A Gradio UI ("DeepSeek AI Orchestrator") that loads local Hugging Face transformers models selected from `legacy/gradio-app/models.json`. It is self-contained and does not touch the `backend/` package at all.
 2. **The actual GHOST prototype** — `backend/` (FastAPI) + `frontend/` (React/Vite). A document-RAG chat system with persistent keyword memory, streaming responses from NVIDIA Nemotron via an OpenAI-compatible API, page-citation tracking, and a force-graph "neural map" UI.
 3. **Empty scaffolding** — `workers/`, `infrastructure/`, `telegram-gateway/`, `tests/` contain only `.gitkeep`; `backend/agents`, `backend/audit`, `backend/integrations`, `backend/memory`, `backend/orchestrator`, `backend/permissions`, `backend/retrieval`, `backend/tasks`, `backend/tools`, `backend/artifacts` contain only empty `__init__.py`. **The names of the GHOST architecture exist; the code does not.**
 
@@ -26,7 +26,7 @@ The prototype is a reasonable **foundation** for GHOST V1 — the retrieval, mem
 ┌────────────────────────────┐        ┌─────────────────────────────────┐
 │  App A: Gradio (legacy)    │        │  App B: GHOST prototype          │
 │                            │        │                                  │
-│  app.py (UI, port 7860)    │        │  frontend/ (React+Vite, :5173)   │
+│  legacy/gradio-app/app.py  │        │  frontend/ (React+Vite, :5173)   │
 │   └─ orchestrator.py       │        │   └─ App.jsx (entire UI, 2860 Ln)│
 │       └─ local HF models   │        │        │ fetch HTTP              │
 │          (torch, CPU/CUDA) │        │        ▼                         │
@@ -58,8 +58,8 @@ in-band `__SOURCES__:<pages>` first chunk for citations.
 
 | Component | Path | Status | Evidence |
 |---|---|---|---|
-| Gradio local-model chat | `app.py`, `orchestrator.py` | Working, standalone legacy app | `app.py:1-197`; loads models per `models.json` |
-| Local model configs | `models.json` | 3 HF models (DeepSeek-Coder-V2-Lite, R1-Distill-Llama-8B, Mistral-7B) | `models.json:6-56` |
+| Gradio local-model chat | `legacy/gradio-app/app.py`, `orchestrator.py` | Working, standalone legacy app | `legacy/gradio-app/app.py:1-197`; loads models per `models.json` |
+| Local model configs | `legacy/gradio-app/models.json` | 3 HF models (DeepSeek-Coder-V2-Lite, R1-Distill-Llama-8B, Mistral-7B) | `legacy/gradio-app/models.json:6-56` |
 | FastAPI app shell | `backend/main.py` | Working; CORS limited to localhost:5173 | `backend/main.py:16-24` |
 | Chat endpoint | `backend/api/chat.py` | Working; contains ~50 lines of unreachable dead code | dead code at `chat.py:304-353` (after `return` at 303) |
 | Upload endpoint | `backend/api/upload.py` | Working; in-memory only, no delete, no size limit | `documents = {}` at `upload.py:13` |
@@ -82,7 +82,7 @@ in-band `__SOURCES__:<pages>` first chunk for citations.
 
 ## 4. Working Functionality Worth Preserving (spec §59)
 
-1. **Honest capability refusal** — the legacy orchestrator refuses to pretend text-only models can see images (`orchestrator.py:533-561`). This is exactly the "never fake capability" principle; keep the pattern.
+1. **Honest capability refusal** — the legacy orchestrator refuses to pretend text-only models can see images (`legacy/gradio-app/orchestrator.py:533-561`). This is exactly the "never fake capability" principle; keep the pattern.
 2. **Deterministic exact-page routing** — page requests are answered by deterministic chunk/page metadata, not LLM guessing, and missing pages produce a scripted refusal (`chat.py:1679-1697`). This is a seed of the spec's "deterministic policy over LLM" principle (§23).
 3. **Trigger-gated memory capture** — memories are only stored when trigger phrases appear, greetings/short messages are skipped, and a keyword secret-blocklist exists (`chat.py:735-877`). Right direction, weak implementation (see threat model).
 4. **Atomic memory writes** — temp file + `os.replace` (`memory.py:166-186`).
@@ -129,7 +129,7 @@ in-band `__SOURCES__:<pages>` first chunk for citations.
 
 ## 7. Assessment Verdict
 
-- The **Gradio app** (`app.py`, root `orchestrator.py`, `models.json`) should be treated as a legacy experiment: preserve it behind a folder or delete it later, but stop co-locating it with the GHOST backend (two apps named "orchestrator" in one repo invites confusion — one `orchestrator.py` at root, a different `backend/core/orchestrator.py`).
+- The **Gradio app** (`legacy/gradio-app/app.py`, `orchestrator.py`, `models.json`) is a quarantined experiment, kept out of the GHOST backend (two apps named "orchestrator" in one repo invites confusion — `legacy/gradio-app/orchestrator.py` vs `backend/core/orchestrator.py`).
 - The **GHOST prototype** is a credible V0.5: document RAG + memory + streaming + a distinctive UI. Its architecture (provider ABC, retriever, memory service) is worth building on rather than rewriting.
 - The gap to the GHOST vision is almost everything security/privacy/agency-related — which is also the stated top priority order of the spec (PRIVACY → SAFETY → …). Therefore the next milestones must add **boundaries** (auth, policy, tool gating) *before* adding **capabilities** (tools, agents, autonomy).
 

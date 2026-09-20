@@ -10,7 +10,14 @@ uploads/
 frontend/node_modules/
 frontend/dist/
 
-legacy/
+# Quarantine tree: ignore stray artifacts, keep the Gradio snapshot tracked.
+legacy/*
+!legacy/gradio-app/
+legacy/gradio-app/**
+!legacy/gradio-app/app.py
+!legacy/gradio-app/orchestrator.py
+!legacy/gradio-app/models.json
+!legacy/gradio-app/requirements.txt
 
 # Local backups
 *_backup.py

@@ -105,6 +105,6 @@ queue instead of multiplying memory/CPU pressure.
 backend/          FastAPI app (api/, core/, providers/)
 frontend/         React + Vite UI
 docs/             Architecture, threat model, privacy, roadmap
-legacy/           Quarantined Gradio experiment (not maintained)
+legacy/gradio-app/ Quarantined Gradio experiment (not maintained)
 tests/            pytest suite
 ```

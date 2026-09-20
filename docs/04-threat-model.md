@@ -49,10 +49,10 @@ Trust boundaries crossed today: browser→backend (no auth), backend→NVIDIA (T
 - **Test**: red-team case — request all routes without a token → expect 401; with token → 200.
 
 ### T2 — Supply-chain code execution via `trust_remote_code=True` (HIGH, legacy app)
-- **Surface**: `orchestrator.py:139-145, 160-172` — `AutoModelForCausalLM.from_pretrained(..., trust_remote_code=True)` for `deepseek-coder-v2`.
+- **Surface**: `legacy/gradio-app/orchestrator.py:139-145, 160-172` — `AutoModelForCausalLM.from_pretrained(..., trust_remote_code=True)` for `deepseek-coder-v2`.
 - **Attack**: compromised/malicious model repo or org takeover on Hugging Face → arbitrary Python executes on load.
 - **Impact**: full host compromise (A5, everything).
-- **Mitigation**: prefer models without remote code (the other two configured models already run with `trust_remote_code: false`, `models.json:37, 53`); pin revision hashes; if remote code is ever required, load in a sandbox.
+- **Mitigation**: prefer models without remote code (the other two configured models already run with `trust_remote_code: false`, `legacy/gradio-app/models.json:37, 53`); pin revision hashes; if remote code is ever required, load in a sandbox.
 - **Test**: config lint — fail CI if `trust_remote_code` is true without an explicit allowlist entry.
 
 ### T3 — Prompt injection via uploaded documents (HIGH — the threat that matters most for GHOST's future)
@@ -93,7 +93,7 @@ Trust boundaries crossed today: browser→backend (no auth), backend→NVIDIA (T
 - Mermaid rendering uses `securityLevel: "strict"` + HTML stripping (`App.jsx:168-236`); model text is rendered via React text nodes (auto-escaped). Residual: Mermaid parse-error path shows raw source in `<pre>` (escaped) — safe. **Regression-test this whenever the renderer changes.**
 
 ### T9 — Legacy Gradio app exposure (LOW–MEDIUM depending on use)
-- `app.py:191-196` launches with `debug=True, show_error=True` (stack traces to browser) and downloads models at runtime; bound to 127.0.0.1 (good). Running two AI servers doubles attack surface for no product reason.
+- `legacy/gradio-app/app.py:191-196` launches with `debug=True, show_error=True` (stack traces to browser) and downloads models at runtime; bound to 127.0.0.1 (good). Running two AI servers doubles attack surface for no product reason.
 - **Mitigation**: quarantine/remove the legacy app (migration plan M0).
 
 ### T10 — Model-ID/config drift (LOW)

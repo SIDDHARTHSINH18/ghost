@@ -11,7 +11,7 @@ Goal: make the repo honest, runnable, and reproducible before adding anything.
 
 1. **Fix `requirements.txt`** — add `fastapi`, `uvicorn`, `httpx`, `pypdf`, `python-docx`, `sentence-transformers`, `scikit-learn`, `python-dotenv` (all currently imported by `backend/` but undeclared — D5).
 2. **Add `README.md`** — how to configure `.env` (from `.env.example`), create venv, install, run `uvicorn backend.main:app --port 8000` and `npm run dev` in `frontend/`.
-3. **Quarantine legacy** — move `app.py`, `orchestrator.py` (root), `models.json` into `legacy/gradio-app/` (D7/T9). Update nothing else; the GHOST backend doesn't import them (verified).
+3. **Quarantine legacy** — `app.py`, `orchestrator.py`, and `models.json` live in `legacy/gradio-app/` (D7/T9). The GHOST backend doesn't import them (verified).
 4. **Delete dead code** — `backend/core/retriever_backup.py`; `frontend/src/components/{ChatWindow,ChatInput,MessageBubble}.jsx`, `GhostFlowDiagram.jsx`, `ghost-flow.css` (verified unimported); unreachable block `chat.py:304-353` (D4).
 5. **Singletons** — create `backend/core/services.py` holding one `MemoryService`, one `Orchestrator`, one provider registry; `chat.py` and `graph.py` import from there (fixes D3 race).
 6. **Wire the real system prompt** — route the live chat path through `Orchestrator` so `build_system_prompt()` actually reaches the model (fixes D2). Smallest change: in the stream call, send `[{system}, {user}]`.

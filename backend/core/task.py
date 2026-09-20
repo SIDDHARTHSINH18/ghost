@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any
 from uuid import uuid4
 from datetime import datetime
 
@@ -21,3 +22,7 @@ class Task:
     updated_at: datetime = field(default_factory=datetime.now)
     result: str | None = None
     error: str | None = None
+    # Populated by the post-execution reflection stage. Kept
+    # deliberately untyped here so core.task remains independent
+    # from the reflection package.
+    reflection: Any = None

@@ -11,6 +11,7 @@ from backend.api.auth import router as auth_router
 from backend.api.chat import router as chat_router
 from backend.api.graph import router as graph_router
 from backend.api.memory import router as memory_router
+from backend.api.tasks import router as tasks_router
 from backend.api.upload import router as upload_router
 from backend.core.security import (
     get_auth_password,
@@ -318,3 +319,4 @@ app.include_router(chat_router)
 app.include_router(upload_router)
 app.include_router(graph_router)
 app.include_router(memory_router)
+app.include_router(tasks_router)
