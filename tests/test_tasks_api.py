@@ -1,14 +1,17 @@
 """
-Focused tests for the M3-H Step 4 live task entry point.
+Focused tests for the M3-H live task entry point.
 
 Verifies the wired flow:
 
   user request -> POST /api/tasks -> Planner -> TaskService
+               -> TaskRunner -> Agent -> PermissionPolicy
+               -> ToolRegistry -> tool result
 
-- ready plans create (and only create) a stored Task
+- ready plans create a stored Task and execute planned
+  tool steps through the permission-gated pipeline
 - clarification rounds create nothing
 - the Planner is never bypassed (gateway sees every request)
-- no tools execute from this path
+- execution always goes through Agent/PermissionPolicy
 - session auth is enforced on the new endpoints
 - existing M1/M2 endpoints keep working
 
@@ -16,6 +19,7 @@ The model gateway is always a fake — no network.
 """
 
 import json
+import os
 
 import pytest
 
@@ -24,6 +28,11 @@ from fastapi.testclient import TestClient
 
 import backend.api.tasks as tasks_api
 from backend.main import app
+
+
+README_ABS = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "README.md")
+)
 
 
 # ============================================================
@@ -61,7 +70,7 @@ def ready_payload():
                 {
                     "description": "Read the notes file",
                     "tool": "fs_read_file",
-                    "params": {"path": "/tmp/notes.txt"},
+                    "params": {"path": README_ABS},
                 }
             ],
             "assumptions": [],
@@ -123,6 +132,9 @@ def exploding_agent(monkeypatch):
     """
     Route the production agent/automation away: if the API
     path ever reaches execution, the test fails loudly.
+
+    The task runner is rebuilt against the guard so the
+    guard is actually what the API path would invoke.
     """
 
     from backend.core import agent_services
@@ -130,19 +142,56 @@ def exploding_agent(monkeypatch):
     guard = ExplodingAgent()
     monkeypatch.setattr(agent_services, "agent", guard)
     monkeypatch.setattr(agent_services, "automation_engine", guard)
+
+    from backend.tasks.runner import TaskRunner
+
+    monkeypatch.setattr(
+        tasks_api,
+        "task_runner",
+        TaskRunner(
+            task_service=tasks_api.task_service,
+            automation_engine=guard,
+            approvals=agent_services.approval_service,
+            reflection_engine=agent_services.reflection_engine,
+        ),
+    )
     return guard
 
 
 @pytest.fixture(autouse=True)
 def empty_task_store(monkeypatch):
-    """Every test starts from a clean, isolated store."""
+    """Every test starts from a clean, isolated store.
 
+    The task runner is rebuilt against the fresh store so
+    execution (when a plan has tool steps) writes to the
+    isolated TaskService, mirroring production construction.
+    """
+
+    from backend.core import agent_services
     from backend.tasks import service as service_module
+    from backend.tasks.runner import TaskRunner
+
+    fresh_store = service_module.TaskService()
 
     monkeypatch.setattr(
         tasks_api,
         "task_service",
-        service_module.TaskService(),
+        fresh_store,
+    )
+
+    monkeypatch.setattr(
+        tasks_api,
+        "task_runner",
+        TaskRunner(
+            task_service=fresh_store,
+            automation_engine=(
+                agent_services.automation_engine
+            ),
+            approvals=agent_services.approval_service,
+            reflection_engine=(
+                agent_services.reflection_engine
+            ),
+        ),
     )
 
 
@@ -151,7 +200,7 @@ def empty_task_store(monkeypatch):
 # ============================================================
 
 def test_clear_request_creates_task_via_planner(
-    auth_client, monkeypatch, exploding_agent
+    auth_client, monkeypatch
 ):
     gateway = FakeGateway(ready_payload())
     monkeypatch.setattr(tasks_api.planner, "_orchestrator", gateway)
@@ -167,7 +216,7 @@ def test_clear_request_creates_task_via_planner(
     body = response.json()
 
     assert body["status"] == "created"
-    assert body["task"]["status"] == TaskStatus.PENDING.value
+    assert body["task"]["status"] == TaskStatus.COMPLETED.value
     assert body["task"]["title"] == "Summarize the project notes"
     assert body["planning"]["ready"] is True
     assert body["planning"]["source"] == "MODEL"
@@ -184,7 +233,15 @@ def test_clear_request_creates_task_via_planner(
     assert len(tasks_api.task_service.list()) == before + 1
     stored = tasks_api.task_service.get(body["task_id"])
     assert stored.title == "Summarize the project notes"
-    assert stored.status == TaskStatus.PENDING  # nothing executed
+
+    # The planned SAFE step executed through the
+    # permission-gated pipeline and completed with real
+    # output (the repository README).
+    assert stored.status == TaskStatus.COMPLETED
+    assert "GHOST" in str(stored.result)
+    assert body["execution"]["task_status"] == (
+        TaskStatus.COMPLETED.value
+    )
 
 
 # ============================================================
@@ -243,8 +300,8 @@ def test_list_and_get_task_endpoints(auth_client, monkeypatch):
 
     single = auth_client.get(f"/api/tasks/{task_id}").json()
     assert single["id"] == task_id
-    assert single["status"] == TaskStatus.PENDING.value
-    assert single["result"] is None
+    assert single["status"] == TaskStatus.COMPLETED.value
+    assert single["result"] is not None
     assert single["error"] is None
 
 
@@ -391,23 +448,25 @@ def test_planner_not_bypassed(auth_client, monkeypatch):
     assert calls == ["do the thing"]  # request went through it
 
 
-def test_no_tools_execute_from_api_path(
-    auth_client, monkeypatch, exploding_agent
+def test_tools_execute_through_permission_policy(
+    auth_client, monkeypatch
 ):
-    """A ready plan referencing a tool stores a PENDING
-    task and never invokes the executor/policy stack."""
+    """A ready plan referencing a tool executes it through
+    the Agent -> PermissionPolicy -> ToolRegistry stack: the
+    policy is consulted before any tool runs."""
 
-    from backend.core import agent_services
     from backend.permissions.policy import PermissionPolicy
 
-    def explode_evaluate(self, tool_name):
-        raise AssertionError(
-            "PermissionPolicy must not be reached from the "
-            "task API path"
-        )
+    policy_calls = []
+
+    original_evaluate = PermissionPolicy.evaluate
+
+    def recording_evaluate(self, tool_name, task_id=None):
+        policy_calls.append(tool_name)
+        return original_evaluate(self, tool_name, task_id=task_id)
 
     monkeypatch.setattr(
-        PermissionPolicy, "evaluate", explode_evaluate
+        PermissionPolicy, "evaluate", recording_evaluate
     )
 
     gateway = FakeGateway(ready_payload())
@@ -415,15 +474,15 @@ def test_no_tools_execute_from_api_path(
 
     response = auth_client.post(
         "/api/tasks",
-        json={"request": "Read /tmp/notes.txt and summarize"},
+        json={"request": f"Read {README_ABS} and summarize"},
     )
 
     assert response.status_code == 201
     task = tasks_api.task_service.get(response.json()["task_id"])
-    assert task.status == TaskStatus.PENDING
-    assert task.result is None
-    assert task.error is None
 
-    # No executor call happened (guard object untouched
-    # because the path never references it).
-    _ = agent_services  # import survived; nothing fired
+    # The permission policy gated the planned tool before it
+    # ran, and the SAFE read completed with real content.
+    assert policy_calls == ["fs_read_file"]
+    assert task.status == TaskStatus.COMPLETED
+    assert "GHOST" in str(task.result)
+    assert task.error is None

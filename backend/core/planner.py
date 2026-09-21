@@ -144,12 +144,17 @@ class Planner:
         orchestrator: Any = None,
         provider_name: Optional[str] = None,
         model: Optional[str] = None,
+        tool_catalog: Optional[List[str]] = None,
     ):
         # Duck-typed: any object with an async generate()
         # matching the Orchestrator gateway signature.
         self._orchestrator = orchestrator
         self._provider_name = provider_name
         self._model = model
+        # Registered tool names the model may reference in
+        # planned steps. Advisory only: steps stay inert and
+        # the PermissionPolicy still gates every real action.
+        self._tool_catalog = list(tool_catalog or [])
 
     # ========================================================
     # PUBLIC API
@@ -247,7 +252,22 @@ class Planner:
             "- If you provide a plan, set "
             "enough_information to true.\n"
             "- Steps are proposals only; they are not "
-            "executed here.\n\n"
+            "executed here.\n"
+        )
+
+        if self._tool_catalog:
+            message += (
+                "\nAvailable tools (use exactly these "
+                "names in steps; omit 'tool' for steps "
+                "that need no tool):\n"
+                + "\n".join(
+                    f"- {name}" for name in self._tool_catalog
+                )
+                + "\n"
+            )
+
+        message += (
+            "\n"
             f"USER REQUEST:\n{request_text}"
         )
 

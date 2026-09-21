@@ -1,7 +1,12 @@
 import json
+import time
+import logging
 import httpx
 
 from backend.providers.base import AIProvider
+
+
+logger = logging.getLogger(__name__)
 
 
 class OpenAICompatibleProvider(AIProvider):
@@ -27,7 +32,9 @@ class OpenAICompatibleProvider(AIProvider):
             "Content-Type": "application/json",
         }
 
-        async with httpx.AsyncClient(timeout=120) as client:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(300.0, connect=10.0)
+        ) as client:
             response = await client.post(
                 f"{self.base_url}/chat/completions",
                 headers=headers,
@@ -58,13 +65,23 @@ class OpenAICompatibleProvider(AIProvider):
             "Content-Type": "application/json",
         }
 
-        async with httpx.AsyncClient(timeout=120) as client:
+        request_start = time.perf_counter()
+        first_chunk_received = False
+
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(300.0, connect=10.0)
+        ) as client:
             async with client.stream(
                 "POST",
                 f"{self.base_url}/chat/completions",
                 headers=headers,
                 json=payload,
             ) as response:
+
+                logger.info(
+                    "NVIDIA response headers: %.2fs",
+                    time.perf_counter() - request_start,
+                )
 
                 response.raise_for_status()
 
@@ -80,6 +97,7 @@ class OpenAICompatibleProvider(AIProvider):
 
                         try:
                             chunk = json.loads(data)
+
                             content = (
                                 chunk["choices"][0]
                                 .get("delta", {})
@@ -87,10 +105,23 @@ class OpenAICompatibleProvider(AIProvider):
                             )
 
                             if content:
+                                if not first_chunk_received:
+                                    first_chunk_received = True
+
+                                    logger.info(
+                                        "NVIDIA first content chunk: %.2fs",
+                                        time.perf_counter() - request_start,
+                                    )
+
                                 yield content
 
                         except json.JSONDecodeError:
                             continue
+
+                logger.info(
+                    "NVIDIA stream completed: %.2fs",
+                    time.perf_counter() - request_start,
+                )
 
     async def ping(self):
         """
@@ -108,7 +139,6 @@ class OpenAICompatibleProvider(AIProvider):
             }
 
         try:
-
             headers = {
                 "Authorization": f"Bearer {self.api_key}",
             }
@@ -127,14 +157,10 @@ class OpenAICompatibleProvider(AIProvider):
             }
 
         except httpx.HTTPError as error:
-
             return {
                 "reachable": False,
-                "detail": (
-                    type(error).__name__
-                ),
+                "detail": type(error).__name__,
             }
 
     async def health_check(self):
         return bool(self.api_key)
-

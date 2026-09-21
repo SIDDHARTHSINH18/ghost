@@ -10,12 +10,12 @@ Boundaries honored here:
 - The ONLY model access is the existing orchestrator
   gateway singleton (backend.core.services). No new
   provider, no second orchestrator.
-- No tools are executed from this path. A planned task
-  is stored PENDING; execution flows through the
-  existing Agent -> PermissionPolicy pipeline in a
-  later, separately authorized step. This module never
-  imports the executor, registry, policy, or automation
-  engine.
+- A ready plan whose steps name registered tools is
+  executed through the existing TaskRunner -> Agent ->
+  PermissionPolicy -> ToolRegistry pipeline: SAFE steps
+  run, SENSITIVE steps pause for explicit approval,
+  DANGEROUS/unknown tools fail closed. Tool-less steps
+  are advisory and are never executed.
 - Clarification rounds create NO task: the planner's
   questions are returned cleanly and the store is left
   untouched until enough information exists.
@@ -40,6 +40,7 @@ from backend.core.agent_services import (
     approval_service,
     automation_engine,
     reflection_engine,
+    tool_registry,
 )
 from backend.core.planner import Planner
 from backend.core.services import orchestrator
@@ -66,7 +67,12 @@ router = APIRouter(
 # task_service is the one in-process task store for
 # this entry point (M3-H step 2 component).
 
-planner = Planner(orchestrator)
+planner = Planner(
+    orchestrator,
+    tool_catalog=[
+        tool.name for tool in tool_registry.list_tools()
+    ],
+)
 
 task_service = TaskService()
 
@@ -183,6 +189,47 @@ async def create_task_from_request(
     # 200 clarification round above.
     response.status_code = 201
 
+    # --------------------------------------------------------
+    # Execute the ready plan through the existing
+    # Agent -> PermissionPolicy -> ToolRegistry pipeline.
+    # Only steps naming a registered tool become real work;
+    # tool-less steps are advisory and are dropped here
+    # (never silently executed). Execution may pause on a
+    # SENSITIVE step (approval flow) or fail closed.
+    # --------------------------------------------------------
+
+    from backend.automation.engine import TaskStep
+
+    executable = [
+        TaskStep(
+            tool_name=step.tool,
+            params=step.params,
+            order=index,
+            title=step.description,
+        )
+        for index, step in enumerate(planning.steps)
+        if step.tool
+    ]
+
+    execution = None
+
+    if executable:
+
+        try:
+
+            execution = task_runner.start(
+                task_id=task.id,
+                steps=executable,
+            )
+
+        except ValueError as error:
+
+            logger.error(
+                "Task %s execution could not start: %s",
+                task.id,
+                error,
+            )
+
     return {
         "status": "created",
         "task_id": task.id,
@@ -194,6 +241,7 @@ async def create_task_from_request(
             "created_at": task.created_at.isoformat(),
         },
         "planning": planning.to_dict(),
+        "execution": execution,
     }
 
 

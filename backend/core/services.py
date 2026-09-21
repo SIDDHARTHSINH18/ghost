@@ -23,7 +23,11 @@ from backend.providers.openai_compatible import (
 )
 
 
-load_dotenv()
+# The project .env is the intended source of truth for provider
+# credentials: override=True makes a stale/mismatched OS-level
+# NVIDIA_API_KEY (Windows user environment) lose to the .env value
+# instead of silently winning via python-dotenv's default behavior.
+load_dotenv(override=True)
 
 
 DEFAULT_NVIDIA_BASE_URL = (

@@ -1,4 +1,4 @@
-import logging
+﻿import logging
 import re
 
 from fastapi import APIRouter, HTTPException, Request
@@ -1623,6 +1623,11 @@ async def chat(
         user_content=user_content,
         history=request.history,
     )
+    logger.info(
+    "Chat payload: messages=%d chars=%d",
+    len(request_messages),
+    sum(len(str(item.get("content", ""))) for item in request_messages),
+)
 
     # ========================================================
     # STREAM RESPONSE
