@@ -2,6 +2,11 @@ import logging
 
 from fastapi import APIRouter
 
+# Singletons owned elsewhere and reused here (read-only):
+# the one task store backing /api/tasks and the one
+# production tool registry. No second instance is created.
+from backend.api.tasks import task_service
+from backend.core.agent_services import tool_registry
 from backend.core.services import documents, memory_service
 
 
@@ -23,6 +28,8 @@ router = APIRouter(
 # authenticated memory API (M1).
 
 MAX_MEMORY_NODES = 12
+
+MAX_TASK_NODES = 12
 
 MAX_LABEL_LENGTH = 38
 
@@ -52,13 +59,13 @@ async def get_graph():
     """
     Return the current GHOST knowledge/access graph.
 
-    The frontend uses this endpoint to visualize:
+    Every node reflects real application state:
     - GHOST core
-    - documents
+    - documents (from the document store)
     - memories (labels only, never content)
-    - projects
-    - tools
-    - tasks
+    - projects (derived from real memory.project values)
+    - tools (the production tool registry)
+    - tasks (the live task store)
     """
 
     nodes = []
@@ -106,6 +113,10 @@ async def get_graph():
                 "Indexed document available to GHOST."
             ),
             "document_id": document_id,
+            "size": document.get(
+                "size",
+                0,
+            ),
             "chunks": len(chunks),
             "pages": len(pages),
             "status": "indexed",
@@ -175,6 +186,12 @@ async def get_graph():
     # from content: short memories would otherwise
     # leak verbatim through the label (caught by
     # tests/test_main.py::test_graph_memory_labels_not_content).
+    #
+    # Node ids are the REAL memory ids so the frontend can
+    # resolve the full memory item through the memory API
+    # when a node is selected.
+    memory_projects = set()
+
     for index, memory in enumerate(
         memory_items[:MAX_MEMORY_NODES]
     ):
@@ -192,7 +209,14 @@ async def get_graph():
             "conversation",
         )
 
-        node_id = f"memory-{index}"
+        memory_id = str(
+            memory.get(
+                "id",
+            )
+            or f"memory-item-{index}"
+        )
+
+        node_id = f"memory-{memory_id}"
 
         nodes.append({
             "id": node_id,
@@ -205,6 +229,7 @@ async def get_graph():
                 "Memory item (content hidden; use the "
                 "memory API to inspect it)."
             ),
+            "memory_id": memory_id,
             "memory_type": memory_type,
         })
 
@@ -214,8 +239,30 @@ async def get_graph():
             "type": "contains",
         })
 
+        # Real relationship: memories may declare the
+        # project they belong to (memory.project field).
+        project = memory.get(
+            "project",
+        )
+
+        if project:
+
+            memory_projects.add(
+                str(project),
+            )
+
+            edges.append({
+                "source": node_id,
+                "target": f"project-{project}",
+                "type": "project_of",
+            })
+
     # ============================================================
     # PROJECTS
+    #
+    # The GHOST system project always exists; additional
+    # project nodes appear only when real memories
+    # reference them through the project field.
     # ============================================================
 
     nodes.append({
@@ -233,82 +280,56 @@ async def get_graph():
         "type": "project",
     })
 
-    # ============================================================
-    # TOOLS
-    # ============================================================
-
-    tools = [
-        {
-            "id": "tool-nemotron",
-            "label": "Nemotron",
-            "description": (
-                "NVIDIA Nemotron model provider."
-            ),
-            "status": "connected",
-        },
-        {
-            "id": "tool-files",
-            "label": "Files",
-            "description": (
-                "File access capability."
-            ),
-            "status": "planned",
-        },
-        {
-            "id": "tool-browser",
-            "label": "Browser",
-            "description": (
-                "Browser agent capability."
-            ),
-            "status": "planned",
-        },
-        {
-            "id": "tool-pc",
-            "label": "PC Agent",
-            "description": (
-                "Authenticated Windows PC agent."
-            ),
-            "status": "planned",
-        },
-        {
-            "id": "tool-gmail",
-            "label": "Gmail",
-            "description": (
-                "Authorized Gmail integration."
-            ),
-            "status": "planned",
-        },
-        {
-            "id": "tool-telegram",
-            "label": "Telegram",
-            "description": (
-                "Telegram gateway."
-            ),
-            "status": "planned",
-        },
-    ]
-
-    for tool in tools:
+    for project in sorted(
+        memory_projects - {"GHOST"}
+    ):
 
         nodes.append({
-            "id": tool["id"],
-            "type": "tool",
-            "label": tool["label"],
-            "description": tool["description"],
-            "status": tool["status"],
+            "id": f"project-{project}",
+            "type": "project",
+            "label": shorten(
+                project,
+                MAX_LABEL_LENGTH,
+            ),
+            "description": (
+                "Project referenced by stored memories."
+            ),
         })
 
-        if tool["status"] == "connected":
-
-            edges.append({
-                "source": "GHOST",
-                "target": tool["id"],
-                "type": "tool",
-            })
+        edges.append({
+            "source": "GHOST",
+            "target": f"project-{project}",
+            "type": "project",
+        })
 
     # ============================================================
-    # TASKS
+    # TOOLS (production tool registry — real capabilities)
     # ============================================================
+
+    for tool in tool_registry.list_tools():
+
+        node_id = f"tool-{tool.name}"
+
+        nodes.append({
+            "id": node_id,
+            "type": "tool",
+            "label": tool.name,
+            "description": tool.description,
+            "category": tool.category,
+            "risk_level": tool.risk_level.value,
+        })
+
+        edges.append({
+            "source": "GHOST",
+            "target": node_id,
+            "type": "tool",
+        })
+
+    # ============================================================
+    # TASKS (live task store — real planned/executed tasks)
+    # ============================================================
+
+    tasks = task_service.list()
 
     nodes.append({
         "id": "tasks-root",
@@ -317,7 +338,7 @@ async def get_graph():
         "description": (
             "GHOST task execution system."
         ),
-        "status": "planned",
+        "status": "active",
     })
 
     edges.append({
@@ -325,6 +346,33 @@ async def get_graph():
         "target": "tasks-root",
         "type": "tasks",
     })
+
+    for task in tasks[-MAX_TASK_NODES:]:
+
+        node_id = f"task-{task.id}"
+
+        nodes.append({
+            "id": node_id,
+            "type": "task",
+            "label": shorten(
+                task.title,
+                MAX_LABEL_LENGTH,
+            ),
+            "description": shorten(
+                task.description,
+                120,
+            ),
+            "task_id": task.id,
+            "status": task.status.value,
+            "priority": task.priority,
+            "created_at": task.created_at.isoformat(),
+        })
+
+        edges.append({
+            "source": "tasks-root",
+            "target": node_id,
+            "type": "contains",
+        })
 
     # ============================================================
     # STATISTICS
@@ -337,8 +385,8 @@ async def get_graph():
         "stats": {
             "documents": len(documents),
             "memories": len(memory_items),
-            "projects": 1,
-            "tools": 1,
-            "tasks": 0,
+            "projects": 1 + len(memory_projects - {"GHOST"}),
+            "tools": len(tool_registry.list_tools()),
+            "tasks": len(tasks),
         },
     }
