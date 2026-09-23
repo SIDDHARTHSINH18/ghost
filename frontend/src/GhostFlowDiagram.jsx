@@ -1037,7 +1037,7 @@ function GhostFlowDiagram({
         </div>
 
         <div className="ghost-diagram-error-text">
-          GHOST received a diagram
+          ENMA received a diagram
           request but could not
           identify any visual nodes.
         </div>
@@ -1050,7 +1050,7 @@ function GhostFlowDiagram({
       <div className="ghost-flow-header">
         <div>
           <span className="ghost-flow-kicker">
-            GHOST VISUAL REASONING
+            ENMA VISUAL REASONING
           </span>
 
           <strong>

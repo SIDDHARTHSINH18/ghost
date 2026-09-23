@@ -1,0 +1,502 @@
+/**
+ * GHOST Design System - Theme Constants
+ * Dark theme with cyberpunk-inspired colors
+ */
+
+/**
+ * Color Palette
+ */
+:root {
+  /* Primary Colors */
+  --color-primary: #00e5ff;
+  --color-primary-dark: #00b8cc;
+  --color-primary-light: #33ecff;
+  
+  /* Secondary Colors */
+  --color-secondary: #ff9d32;
+  --color-secondary-dark: #cc7d28;
+  --color-secondary-light: #ffb04d;
+  
+  /* Accent Colors */
+  --color-accent-cyan: #00e5ff;
+  --color-accent-green: #16f5a5;
+  --color-accent-violet: #a855ff;
+  --color-accent-amber: #ff9d32;
+  --color-accent-red: #ff4d67;
+  --color-accent-blue: #299cff;
+  
+  /* Neutral Colors */
+  --color-bg-primary: #000000;
+  --color-bg-secondary: #01080d;
+  --color-bg-tertiary: rgba(1, 8, 13, 0.96);
+  --color-bg-quaternary: rgba(0, 5, 9, 0.97);
+  
+  --color-text-primary: #d9f7ff;
+  --color-text-secondary: #bceff8;
+  --color-text-tertiary: #7ea9b7;
+  --color-text-muted: #4c6d79;
+  
+  --color-border: rgba(0, 229, 255, 0.2);
+  --color-border-light: rgba(0, 229, 255, 0.1);
+  --color-border-dark: rgba(0, 229, 255, 0.3);
+  
+  /* State Colors */
+  --color-state-idle: #00e5ff;
+  --color-state-listening: #ffd43b;
+  --color-state-thinking: #ffd43b;
+  --color-state-planning: #a855ff;
+  --color-state-executing: #16f5a5;
+  --color-state-verifying: #ff9d32;
+  --color-state-completed: #16f5a5;
+  --color-state-error: #ff4d67;
+  --color-state-approval: #ff4d67;
+  /* Aliases for command status */
+  --color-state-warning: var(--color-state-verifying);
+  --color-state-info: var(--color-state-thinking);
+  
+  /* Shadows */
+  --shadow-glow: 0 0 15px rgba(0, 229, 255, 0.9);
+  --shadow-glow-strong: 0 0 25px rgba(0, 229, 255, 0.9);
+  --shadow-card: 0 0 20px rgba(0, 0, 0, 0.5);
+  --shadow-panel: -18px 0 60px rgba(0, 0, 0, 0.45), 0 0 30px rgba(0, 229, 255, 0.09), inset 0 0 35px rgba(0, 229, 255, 0.025);
+  
+  /* Transitions */
+  --transition-fast: 0.15s ease;
+  --transition-medium: 0.2s ease;
+  --transition-slow: 0.3s ease;
+  
+  /* Border Radius */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-full: 50%;
+  
+  /* Typography */
+  --font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  
+  --font-size-xs: 10px;
+  --font-size-sm: 12px;
+  --font-size-base: 14px;
+  --font-size-lg: 16px;
+  --font-size-xl: 18px;
+  --font-size-2xl: 20px;
+  --font-size-3xl: 24px;
+  
+  --font-weight-light: 300;
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+  
+  /* Line Heights */
+  --line-height-tight: 1.4;
+  --line-height-normal: 1.6;
+  --line-height-relaxed: 1.8;
+  
+  /* Spacing */
+  --spacing-px: 1px;
+  --spacing-0: 0;
+  --spacing-0-5: 2px;
+  --spacing-1: 4px;
+  --spacing-1-5: 6px;
+  --spacing-2: 8px;
+  --spacing-2-5: 10px;
+  --spacing-3: 12px;
+  --spacing-3-5: 14px;
+  --spacing-4: 16px;
+  --spacing-4-5: 18px;
+  --spacing-5: 20px;
+  --spacing-5-5: 22px;
+  --spacing-6: 24px;
+  --spacing-7: 28px;
+  --spacing-8: 32px;
+  --spacing-9: 36px;
+  --spacing-10: 40px;
+  
+  /* Additional spacing */
+  --spacing-11: 44px;
+  --spacing-12: 48px;
+  
+  /* Typography */
+  --letter-spacing-wide: 1.5px;
+  
+  /* Text accent color */
+  --color-text-accent: var(--color-accent-cyan);
+  
+  /* Quick Action Button */
+  --quick-action-bg: rgba(1, 8, 13, 0.9);
+  --quick-action-border: rgba(0, 229, 255, 0.2);
+  --quick-action-border-radius: 8px;
+  --quick-action-hover-bg: rgba(0, 229, 255, 0.1);
+}
+
+/**
+ * Dark theme overrides
+ */
+.dark {
+  --color-bg-primary: #000000;
+  --color-bg-secondary: #01080d;
+  --color-bg-tertiary: rgba(1, 8, 13, 0.96);
+  --color-bg-quaternary: rgba(0, 5, 9, 0.97);
+  
+  --color-text-primary: #d9f7ff;
+  --color-text-secondary: #bceff8;
+  --color-text-tertiary: #7ea9b7;
+  --color-text-muted: #4c6d79;
+}
+
+/**
+ * Component-specific themes
+ */
+
+/* Ghost Core */
+.ghost-core-theme {
+  --core-size: 360px;
+  --core-height: 330px;
+  --core-orbit-width: 240px;
+  --core-glow-color: rgba(0, 229, 255, 0.14);
+  --core-disc-border: rgba(0, 229, 255, 0.6);
+  --core-disc-shadow: 0 0 28px rgba(0, 229, 255, 0.13), inset 0 0 35px rgba(0, 229, 255, 0.06);
+  --core-name-color: #eaffff;
+  --core-name-shadow: 0 0 16px rgba(0, 229, 255, 0.65);
+  --core-line-color: #00e5ff;
+  --core-line-shadow: 0 0 9px rgba(0, 229, 255, 0.8);
+  --core-state-color: #66aabc;
+  --core-status-dot-color: #00e5ff;
+  --core-status-dot-shadow: 0 0 9px rgba(0, 229, 255, 0.85);
+  --core-hint-color: #345463;
+}
+
+/* Chat Components */
+.chat-theme {
+  --chat-bg: rgba(0, 5, 9, 0.97);
+  --chat-border: rgba(0, 229, 255, 0.15);
+  --chat-input-bg: rgba(1, 12, 17, 0.95);
+  --chat-input-border: rgba(0, 229, 255, 0.22);
+  --chat-input-border-focus: rgba(0, 229, 255, 0.65);
+  --chat-input-color: #dffaff;
+  --chat-input-placeholder: #41616d;
+  --chat-send-bg: rgba(0, 229, 255, 0.1);
+  --chat-send-bg-hover: rgba(0, 229, 255, 0.2);
+  --chat-send-color: #baf7ff;
+  --chat-user-bg: rgba(0, 229, 255, 0.045);
+  --chat-user-border: rgba(0, 229, 255, 0.17);
+  --chat-ghost-bg: rgba(255, 255, 255, 0.022);
+  --chat-ghost-border: rgba(100, 180, 200, 0.13);
+  --chat-message-user-color: #ccecf3;
+  --chat-message-ghost-color: #d6f4fa;
+  --chat-meta-color: #477c8e;
+  --chat-meta-user-color: #55c9df;
+  --chat-line-bg: rgba(100, 190, 210, 0.13);
+  --chat-thinking-dot-bg: #00e5ff;
+  --chat-thinking-dot-shadow: 0 0 12px rgba(0, 229, 255, 0.9);
+  --chat-code-bg: #02090d;
+  --chat-code-border: rgba(0, 229, 255, 0.18);
+  --chat-code-color: #bdeff7;
+  --chat-code-language-color: #4d8797;
+  --chat-source-chip-bg: rgba(0, 229, 255, 0.05);
+  --chat-source-chip-border: rgba(0, 229, 255, 0.25);
+  --chat-source-chip-color: #72cfe0;
+}
+
+/* Drawer Components */
+.drawer-theme {
+  --drawer-bg: rgba(1, 8, 13, 0.96);
+  --drawer-border: rgba(0, 229, 255, 0.3);
+  --drawer-header-bg: linear-gradient(180deg, rgba(0, 229, 255, 0.045), transparent);
+  --drawer-header-border: rgba(0, 229, 255, 0.15);
+  --drawer-icon-bg: rgba(0, 229, 255, 0.06);
+  --drawer-icon-border: rgba(0, 229, 255, 0.28);
+  --drawer-icon-color: #00e5ff;
+  --drawer-icon-shadow: 0 0 24px rgba(0, 229, 255, 0.08);
+  --drawer-title-color: #dffaff;
+  --drawer-description-color: #7093a1;
+  --drawer-primary-action-bg: rgba(0, 229, 255, 0.12);
+  --drawer-primary-action-border: rgba(0, 229, 255, 0.6);
+  --drawer-primary-action-color: #bff8ff;
+  --drawer-primary-action-hover-bg: rgba(0, 229, 255, 0.2);
+  --drawer-primary-action-hover-shadow: 0 0 25px rgba(0, 229, 255, 0.18);
+  --drawer-secondary-action-bg: rgba(255, 255, 255, 0.025);
+  --drawer-secondary-action-border: rgba(130, 180, 195, 0.2);
+  --drawer-secondary-action-color: #7ea9b7;
+  --drawer-secondary-action-hover-color: #d7f7ff;
+  --drawer-secondary-action-hover-border: rgba(0, 229, 255, 0.4);
+  --drawer-active-doc-bg: rgba(22, 245, 165, 0.035);
+  --drawer-active-doc-border: rgba(22, 245, 165, 0.25);
+  --drawer-active-doc-name-color: #dffff4;
+  --drawer-active-doc-status-color: #63cba4;
+  --drawer-empty-panel-color: #4c6d79;
+  --drawer-empty-panel-border: rgba(100, 160, 175, 0.2);
+  --drawer-doc-row-bg: rgba(7, 24, 20, 0.55);
+  --drawer-doc-row-active-bg: rgba(22, 245, 165, 0.08);
+  --drawer-doc-row-border: rgba(22, 245, 165, 0.2);
+  --drawer-doc-row-active-border: rgba(22, 245, 165, 0.55);
+  --drawer-doc-name-color: #d8fff1;
+  --drawer-doc-meta-color: #45816f;
+  --drawer-row-delete-bg: rgba(255, 77, 103, 0.05);
+  --drawer-row-delete-border: rgba(255, 77, 103, 0.35);
+  --drawer-row-delete-color: #ff6b82;
+  --drawer-row-delete-hover-bg: rgba(255, 77, 103, 0.16);
+  --drawer-row-delete-hover-border: rgba(255, 77, 103, 0.7);
+  --drawer-stat-grid-bg: rgba(255, 255, 255, 0.015);
+  --drawer-stat-grid-border: rgba(100, 170, 190, 0.14);
+  --drawer-stat-grid-text-color: #4c7180;
+  --drawer-stat-grid-number-color: #b9effa;
+  --drawer-big-stat-color: #dffbff;
+  --drawer-big-stat-label-color: #4f7b8b;
+  --drawer-info-block-bg: rgba(41, 156, 255, 0.035);
+  --drawer-info-block-border: #299cff;
+  --drawer-info-block-text-color: #4e7788;
+  --drawer-info-block-value-color: #6dbdff;
+  --drawer-memory-chip-color: #299cff;
+  --drawer-memory-chip-border: rgba(41, 156, 255, 0.4);
+  --drawer-memory-chip-project-color: #a855ff;
+  --drawer-memory-chip-border-project: rgba(168, 85, 255, 0.4);
+  --drawer-memory-chip-preference-color: #16f5a5;
+  --drawer-memory-chip-border-preference: rgba(22, 245, 165, 0.4);
+  --drawer-memory-chip-decision-color: #ffd43b;
+  --drawer-memory-chip-border-decision: rgba(255, 212, 59, 0.4);
+  --drawer-memory-date-color: #3f6575;
+  --drawer-memory-content-color: #cdeef8;
+  --drawer-memory-row-foot-color: #3f6575;
+  --drawer-memory-chip-text-color: #299cff;
+  --drawer-memory-delete-bg: rgba(255, 77, 103, 0.05);
+  --drawer-memory-delete-border: rgba(255, 77, 103, 0.35);
+  --drawer-memory-delete-color: #ff6b82;
+  --drawer-memory-delete-hover-bg: rgba(255, 77, 103, 0.16);
+  --drawer-memory-delete-hover-border: rgba(255, 77, 103, 0.7);
+  --drawer-future-badge-bg: rgba(255, 157, 50, 0.035);
+  --drawer-future-badge-border: rgba(255, 157, 50, 0.22);
+  --drawer-future-badge-color: #c28346;
+  --drawer-guardian-badge-bg: rgba(255, 77, 103, 0.035);
+  --drawer-guardian-badge-border: rgba(255, 77, 103, 0.25);
+  --drawer-guardian-badge-color: #d26a7b;
+  --drawer-security-status-bg: rgba(255, 77, 103, 0.035);
+  --drawer-security-status-border: rgba(255, 77, 103, 0.22);
+  --drawer-security-dot-color: #ff4d67;
+  --drawer-security-dot-shadow: 0 0 13px rgba(255, 77, 103, 0.75);
+  --drawer-security-text-color: #765864;
+  --drawer-security-value-color: #ff8093;
+  --drawer-inspector-data-border: rgba(100, 170, 190, 0.12);
+  --drawer-inspector-data-text-color: #4e7180;
+  --drawer-inspector-data-value-color: #b9e9f2;
+  --drawer-panel-icon-size: 54px;
+  --drawer-panel-icon-border-radius: 14px;
+  --drawer-panel-title-size: 18px;
+  --drawer-panel-description-size: 12px;
+  --drawer-primary-action-height: 46px;
+  --drawer-secondary-action-height: 46px;
+  --drawer-active-doc-padding: 17px;
+  --drawer-active-doc-name-size: 13px;
+  --drawer-active-doc-status-size: 7px;
+  --drawer-empty-panel-padding: 25px 16px;
+  --drawer-empty-panel-size: 8px;
+  --drawer-doc-row-padding: 12px 13px;
+  --drawer-doc-row-border-radius: 10px;
+  --drawer-doc-name-size: 12px;
+  --drawer-doc-meta-size: 7px;
+  --drawer-row-delete-padding: 3px 9px;
+  --drawer-row-delete-border-radius: 5px;
+  --drawer-row-delete-size: 7px;
+  --drawer-stat-grid-padding: 14px;
+  --drawer-stat-grid-border-radius: 9px;
+  --drawer-stat-grid-text-size: 7px;
+  --drawer-stat-grid-number-size: 15px;
+  --drawer-big-stat-padding: 24px 0;
+  --drawer-big-stat-value-size: 42px;
+  --drawer-big-stat-label-size: 7px;
+  --drawer-info-block-padding: 16px;
+  --drawer-info-block-border-width: 2px;
+  --drawer-info-block-text-size: 7px;
+  --drawer-info-block-value-size: 11px;
+  --drawer-memory-row-padding: 12px 13px;
+  --drawer-memory-row-border-radius: 10px;
+  --drawer-memory-chip-padding: 2px 8px;
+  --drawer-memory-chip-border-radius: 5px;
+  --drawer-memory-chip-size: 7px;
+  --drawer-memory-date-size: 8px;
+  --drawer-memory-content-size: 12px;
+  --drawer-memory-row-foot-size: 7px;
+  --drawer-memory-chip-text-size: 7px;
+  --drawer-memory-delete-padding: 3px 9px;
+  --drawer-memory-delete-border-radius: 5px;
+  --drawer-memory-delete-size: 7px;
+  --drawer-future-badge-padding: 12px;
+  --drawer-future-badge-border-radius: 7px;
+  --drawer-future-badge-size: 7px;
+  --drawer-guardian-badge-padding: 12px;
+  --drawer-guardian-badge-border-radius: 7px;
+  --drawer-guardian-badge-size: 7px;
+  --drawer-security-status-padding: 17px;
+  --drawer-security-status-border-radius: 10px;
+  --drawer-security-dot-size: 9px;
+  --drawer-security-value-size: 10px;
+  --drawer-security-label-size: 7px;
+  --drawer-inspector-data-padding: 13px 0;
+  --drawer-inspector-data-border-width: 1px;
+  --drawer-inspector-data-text-size: 7px;
+  --drawer-inspector-data-value-size: 10px;
+}
+
+/* Navigation Rail */
+.nav-rail-theme {
+  --rail-width: 62px;
+  --rail-padding: 9px 7px;
+  --rail-border: rgba(0, 229, 255, 0.23);
+  --rail-border-radius: 17px;
+  --rail-bg: rgba(0, 7, 11, 0.86);
+  --rail-backdrop-filter: blur(15px);
+  --rail-box-shadow: 0 0 28px rgba(0, 229, 255, 0.07), inset 0 0 25px rgba(0, 229, 255, 0.025);
+  --rail-button-width: 46px;
+  --rail-button-height: 46px;
+  --rail-button-border: rgba(87, 161, 184, 0.16);
+  --rail-button-border-radius: 12px;
+  --rail-button-bg: rgba(4, 18, 24, 0.78);
+  --rail-button-color: #5c899a;
+  --rail-button-hover-transform: translateX(-3px);
+  --rail-button-hover-border: rgba(0, 229, 255, 0.5);
+  --rail-button-hover-color: #c9f7ff;
+  --rail-button-hover-bg: rgba(0, 229, 255, 0.07);
+  --rail-button-hover-box-shadow: 0 0 18px rgba(0, 229, 255, 0.12);
+  --rail-button-active-color: #eaffff;
+  --rail-button-active-border: #00e5ff;
+  --rail-button-active-bg: rgba(0, 229, 255, 0.12);
+  --rail-button-active-box-shadow: 0 0 19px rgba(0, 229, 255, 0.24), inset 0 0 14px rgba(0, 229, 255, 0.08);
+  --rail-button-document-active-border: #16f5a5;
+  --rail-button-document-active-color: #16f5a5;
+  --rail-button-memory-active-border: #299cff;
+  --rail-button-memory-active-color: #299cff;
+  --rail-button-project-active-border: #a855ff;
+  --rail-button-project-active-color: #a855ff;
+  --rail-button-task-active-border: #ff9d32;
+  --rail-button-task-active-color: #ff9d32;
+  --rail-button-tool-active-border: #ffd43b;
+  --rail-button-tool-active-color: #ffd43b;
+  --rail-button-guardian-active-border: #ff4d67;
+  --rail-button-guardian-active-color: #ff4d67;
+  --rail-glyph-size: 18px;
+  --rail-label-position: right 59px top 50%;
+  --rail-label-padding: 7px 9px;
+  --rail-label-border: rgba(0, 229, 255, 0.25);
+  --rail-label-border-radius: 6px;
+  --rail-label-bg: rgba(0, 8, 13, 0.95);
+  --rail-label-color: #9cd8e8;
+  --rail-label-font-size: 7px;
+  --rail-label-letter-spacing: 1.7px;
+  --rail-label-opacity: 0;
+  --rail-label-pointer-events: none;
+  --rail-label-white-space: nowrap;
+  --rail-label-transition: opacity 0.18s ease, transform 0.18s ease;
+  --rail-button-hover-label-opacity: 1;
+  --rail-button-hover-label-transform: translateY(-50%) translateX(0);
+  --rail-separator-width: 31px;
+  --rail-separator-height: 1px;
+  --rail-separator-margin: 2px 0;
+  --rail-separator-bg: rgba(0, 229, 255, 0.2);
+}
+
+/* Main Layout */
+.main-layout-theme {
+  --header-height: 60px;
+  --footer-height: 40px;
+  --command-area-height: 58px;
+  --command-area-padding: 5px;
+  --command-area-border: rgba(0, 229, 255, 0.32);
+  --command-area-border-radius: 13px;
+  --command-area-bg: rgba(1, 8, 13, 0.94);
+  --command-area-box-shadow: 0 0 35px rgba(0, 229, 255, 0.08);
+  --command-icon-size: 48px;
+  --command-upload-size: 48px;
+  --command-send-size: 48px;
+  --command-icon-bg: rgba(0, 229, 255, 0.04);
+  --command-icon-color: #00e5ff;
+  --command-upload-bg: rgba(22, 245, 165, 0.04);
+  --command-upload-color: #16f5a5;
+  --command-send-bg: rgba(0, 229, 255, 0.11);
+  --command-send-color: #dfffff;
+  --command-icon-hover-bg: rgba(0, 229, 255, 0.12);
+  --command-upload-hover-bg: rgba(22, 245, 165, 0.12);
+  --command-send-hover-bg: rgba(0, 229, 255, 0.12);
+  --command-send-disabled-opacity: 0.3;
+  --command-textarea-bg: transparent;
+  --command-textarea-color: #e2faff;
+  --command-textarea-caret-color: #00e5ff;
+  --command-textarea-font-size: 14px;
+  --command-textarea-line-height: 1.45;
+  --command-textarea-placeholder-color: #456572;
+  --command-links-color: #345664;
+  --command-links-font-size: 6px;
+  --command-links-letter-spacing: 1.2px;
+  --command-links-button-padding: 2px;
+  --command-links-button-hover-color: #a6e9f4;
+  --footer-left-color: #294957;
+  --footer-right-color: #385d6b;
+  --footer-online-color: #00e5ff;
+  --footer-online-shadow: 0 0 8px rgba(0, 229, 255, 0.8);
+  --footer-divider-color: #203a44;
+}
+
+/* Responsive Breakpoints */
+@media (max-width: 1050px) {
+  :root {
+    --left-hud-left: 18px;
+    --left-hud-scale: 0.88;
+    --ghost-rail-right: 12px;
+    --ghost-drawer-right: 83px;
+    --ghost-drawer-width: min(390px, 46vw);
+    --command-area-width: 62vw;
+  }
+}
+
+@media (max-width: 800px) {
+  :root {
+    --ghost-brand-left: 22px;
+    --ghost-brand-top: 22px;
+    --system-status-right: 20px;
+    --system-status-top: 25px;
+    --system-status-font-size: 6px;
+    --left-hud-display: none;
+    --ghost-core-transform: translate(-50%, -50%) scale(0.8);
+    --ghost-rail-right: 9px;
+    --ghost-drawer-right: 75px;
+    --ghost-drawer-width: calc(100vw - 92px);
+    --ghost-drawer-height: 76vh;
+    --command-area-width: calc(100vw - 110px);
+    --command-area-bottom: 18px;
+    --footer-left-display: none;
+    --footer-right-right: 18px;
+    --footer-right-bottom: 15px;
+    --answer-overlay-padding: 20px;
+    --answer-overlay-inner-width: 100%;
+    --answer-overlay-inner-height: 90vh;
+    --answer-overlay-content-padding: 25px 20px 40px;
+    --floating-answer-right: 85px;
+    --floating-answer-bottom: 105px;
+    --floating-answer-width: calc(100vw - 105px);
+  }
+}
+
+@media (max-width: 550px) {
+  :root {
+    --brand-main-font-size: 17px;
+    --brand-main-letter-spacing: 5px;
+    --brand-sub-font-size: 6px;
+    --system-status-hidden-selector: span:not(.system-dot):nth-last-child(-n + 3);
+    --ghost-rail-width: 54px;
+    --ghost-rail-padding: 6px 4px;
+    --ghost-rail-border-radius: 13px;
+    --rail-button-width: 42px;
+    --rail-button-height: 42px;
+    --ghost-drawer-right: 68px;
+    --ghost-drawer-width: calc(100vw - 76px);
+    --ghost-drawer-height: 80vh;
+    --command-area-width: calc(100vw - 82px);
+    --command-icon-width: 40px;
+    --command-upload-width: 40px;
+    --command-send-width: 40px;
+    --command-links-gap: 5px;
+    --command-links-font-size: 5px;
+    --ghost-core-transform: translate(-50%, -50%) scale(0.67);
+  }
+}

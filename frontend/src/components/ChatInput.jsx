@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import apiService from "../services/apiService";
 
 function ChatInput({
   message,
@@ -23,20 +24,7 @@ function ChatInput({
     formData.append("file", file);
 
     try {
-      const response = await fetch(
-        "http://127.0.0.1:8000/api/upload",
-        {
-          method: "POST",
-          body: formData,
-        }
-      );
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(errorText || "Upload failed");
-      }
-
-      const data = await response.json();
+      const data = await apiService.upload(formData);
 
       setDocumentId(data.document_id);
 
