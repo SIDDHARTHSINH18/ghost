@@ -21,7 +21,7 @@ export default function Message({
             <div className="avatar-disc" />
             <div className="avatar-orbit" />
           </div>
-          <span className="avatar-label">G</span>
+          <span className="avatar-label">E</span>
         </div>
       )}
 

@@ -92,7 +92,7 @@ export default function RailNavigator({ activeTab, onTabChange }) {
       {/* Branding top node */}
       <div className="rail-brand">
         <div className="rail-brand-inner">
-          G
+          E
         </div>
       </div>
 

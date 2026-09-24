@@ -4,6 +4,7 @@ import DrawerSystem from "./DrawerSystem";
 import NodeInspector from "../visualization/NodeInspector";
 import ChatWorkspace from "../chat/ChatWorkspace";
 import { formatBytes, formatDateTime, formatScore } from "../../utils/helpers";
+import { API_URL } from "../../utils/constants";
 
 /**
  * MainLayout - Obsidian-style workspace shell.
@@ -61,7 +62,7 @@ export default function MainLayout({
   useEffect(() => {
     const fetchProviderStatus = async () => {
       try {
-        const response = await fetch("/health/provider", {
+        const response = await fetch(`${API_URL}/health/provider`, {
           credentials: "include"
         });
         if (response.ok) {
@@ -129,7 +130,7 @@ export default function MainLayout({
       <header className="main-layout-header">
         <div className="top-bar">
           <div className="top-bar-left">
-            <span className="brand-mark">G</span>
+            <span className="brand-mark">E</span>
             <span className="brand-name">ENMA</span>
             <span className="workspace-divider">/</span>
             <span className="workspace-name">

@@ -21,6 +21,7 @@ class OpenAICompatibleProvider(AIProvider):
 
         payload = {
             "messages": messages,
+		"stream": False,
             **kwargs,
         }
 
@@ -32,20 +33,67 @@ class OpenAICompatibleProvider(AIProvider):
             "Content-Type": "application/json",
         }
 
+        request_url = f"{self.base_url}/chat/completions"
+        request_start = time.perf_counter()
+
+        # Safe diagnostics: URL, model, timing, status — never
+        # headers or key material.
+        logger.info(
+            "NVIDIA request: url=%s model=%s messages=%d "
+            "stream=%s max_tokens=%s",
+            request_url,
+            payload.get("model"),
+            len(payload["messages"]),
+            payload.get("stream"),
+            payload.get("max_tokens", "unset"),
+        )
+
         async with httpx.AsyncClient(
-            timeout=httpx.Timeout(300.0, connect=10.0)
+            timeout=httpx.Timeout(300.0, connect=10.0, read=300.0)
         ) as client:
-            response = await client.post(
-                f"{self.base_url}/chat/completions",
-                headers=headers,
-                json=payload,
+            try:
+                response = await client.post(
+                    request_url,
+                    headers=headers,
+                    json=payload,
+                )
+            except httpx.HTTPError as error:
+                logger.error(
+                    "NVIDIA request failed before/while receiving "
+                    "response: type=%s message=%s elapsed=%.2fs",
+                    type(error).__name__,
+                    error,
+                    time.perf_counter() - request_start,
+                )
+                raise
+
+            logger.info(
+                "NVIDIA response headers: status=%d in %.2fs",
+                response.status_code,
+                time.perf_counter() - request_start,
             )
+
+            if response.status_code >= 400:
+                # Sanitized error body: provider error JSON/text
+                # only — never headers, never request material.
+                logger.error(
+                    "NVIDIA error body[:500]=%r",
+                    response.text[:500],
+                )
 
             response.raise_for_status()
 
             data = response.json()
 
-            return data["choices"][0]["message"]["content"]
+            content = data["choices"][0]["message"]["content"]
+
+            logger.info(
+                "NVIDIA response complete in %.2fs (content_chars=%d)",
+                time.perf_counter() - request_start,
+                len(content or ""),
+            )
+
+            return content
 
     async def generate_stream(self, messages, model=None, **kwargs):
         if not self.api_key:
@@ -69,7 +117,7 @@ class OpenAICompatibleProvider(AIProvider):
         first_chunk_received = False
 
         async with httpx.AsyncClient(
-            timeout=httpx.Timeout(300.0, connect=10.0)
+            timeout=httpx.Timeout(300.0, connect=10.0, read=300.0)
         ) as client:
             async with client.stream(
                 "POST",

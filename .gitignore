@@ -22,3 +22,11 @@ legacy/gradio-app/**
 # Local backups
 *_backup.py
 backend_before_ghost_rename/
+
+# Electron desktop generated files
+desktop/node_modules/
+desktop/dist/
+desktop/dist2/
+desktop/dist3/
+desktop/dist4/
+desktop/dist-verify/

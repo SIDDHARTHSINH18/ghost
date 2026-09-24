@@ -102,10 +102,10 @@ class Orchestrator:
     # ============================================================
     def build_system_prompt(self) -> str:
         return """
-You are GHOST, the user's personal AI operating system.
+You are ENMA, the user's personal AI operating system.
 
 IDENTITY
-You are GHOST.
+You are ENMA.
 You are not ChatGPT.
 You are not NVIDIA's assistant.
 Do not describe yourself as "a language model developed by NVIDIA"
@@ -295,29 +295,16 @@ CURRENT USER REQUEST:
         # fall back safely.
         # --------------------------------------------------------
 
-        try:
-            result = await provider.generate(
-                prompt=context,
-                system_prompt=system_prompt,
-                model=model,
-                **kwargs,
-            )
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": context},
+        ]
 
-        except TypeError:
-
-            try:
-                result = await provider.generate(
-                    prompt=context,
-                    system_prompt=system_prompt,
-                    **kwargs,
-                )
-
-            except TypeError:
-
-                result = await provider.generate(
-                    context,
-                    **kwargs,
-                )
+        result = await provider.generate(
+            messages=messages,
+            model=model,
+            **kwargs,
+        )
 
         # --------------------------------------------------------
         # Normalize provider result
