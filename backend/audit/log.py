@@ -80,7 +80,10 @@ _SECRET_ASSIGNMENT = re.compile(
     r"(?i)\b("
     r"api[_-]?key|apikey|authorization|password|passwd|"
     r"secret|client[_-]?secret|access[_-]?token|"
-    r"refresh[_-]?token|bearer|token"
+    r"refresh[_-]?token|bearer|token|"
+    # Bare "key" covers query-parameter credentials such as
+    # Google's "?key=..." URLs and generic "key=<value>" errors.
+    r"key"
     r")(\s*[:=]\s*)([\"']?)([^\s\"',;]+)([\"']?)"
 )
 

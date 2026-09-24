@@ -265,7 +265,7 @@ def test_stored_secrets_are_redacted_in_the_response(auth_client, store):
 
     assert "sk-SECRETSECRET123" not in text
     assert "hunter2hunter2" not in text
-    assert assert "SYNTHETIC_GOOGLE_TEST_KEY" not in text
+    assert "SYNTHETIC_GOOGLE_TEST_KEY" not in text
     assert "[redacted]" in text
 
 
