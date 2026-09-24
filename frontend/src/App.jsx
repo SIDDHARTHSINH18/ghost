@@ -505,7 +505,7 @@ function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message: userMessage + contextLine,
-          provider: "nemotron",
+          provider: "gemini",
           model: null,
           document_id: documentId,
           history,

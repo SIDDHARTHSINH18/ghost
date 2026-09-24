@@ -161,6 +161,76 @@ class AutomationEngine:
             steps=ordered,
         )
 
+    async def run_async(
+        self,
+        task: Task,
+        steps: list,
+    ) -> AutomationResult:
+        """
+        Async twin of run() (M4 step 3), for workflows whose
+        steps need the model gateway.
+
+        Sequential order, permission-gated execution, pause on
+        REQUIRE_APPROVAL, fail-closed on denial/failure, and the
+        final COMPLETED bookkeeping are all identical to run().
+        The synchronous run() is left untouched because it is
+        proven code; this method exists so a FastAPI request can
+        await one workflow without asyncio.run(), a nested loop,
+        or a thread bridge.
+
+        Completed steps are never re-executed by this method:
+        callers resume with the remaining step list, exactly as
+        TaskRunner already does.
+        """
+
+        task.status = TaskStatus.RUNNING
+
+        ordered = sorted(steps, key=lambda step: step.order)
+
+        for step in ordered:
+
+            # Same workflow-level status restoration the sync
+            # path performs: a later SENSITIVE step must pause a
+            # RUNNING task, not a COMPLETED one.
+            task.status = TaskStatus.RUNNING
+
+            result = await self._agent.execute_async(
+                task,
+                step.tool_name,
+                step.params,
+            )
+
+            self._sync_step(step, result)
+
+            if result.decision == PermissionDecision.REQUIRE_APPROVAL:
+                return AutomationResult(
+                    task_id=task.id,
+                    state=WorkflowState.PAUSED,
+                    steps=ordered,
+                    reason=result.reason,
+                )
+
+            if result.status == TaskStatus.FAILED:
+                task.status = TaskStatus.FAILED
+                task.error = result.error or result.reason
+                return AutomationResult(
+                    task_id=task.id,
+                    state=WorkflowState.FAILED,
+                    steps=ordered,
+                    reason=task.error,
+                )
+
+        task.status = TaskStatus.COMPLETED
+        task.result = {
+            step.tool_name: step.result for step in ordered
+        }
+        task.error = None
+        return AutomationResult(
+            task_id=task.id,
+            state=WorkflowState.COMPLETED,
+            steps=ordered,
+        )
+
     @staticmethod
     def _sync_step(
         step: TaskStep,

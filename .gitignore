@@ -30,3 +30,9 @@ desktop/dist2/
 desktop/dist3/
 desktop/dist4/
 desktop/dist-verify/
+
+desktop/dist-new/
+.zcode/plans/
+test_gemini.py
+test_gemini_api.py
+backend/providers/New Text Document.txt

@@ -61,7 +61,7 @@ const chatService = {
       // Route to chat endpoint
       const response = await apiService.post('/api/chat', {
         message,
-        provider: "nemotron",
+        provider: "gemini",
         model: null,
         document_id: documentId,
         history: history,
@@ -96,7 +96,7 @@ const chatService = {
         method: 'POST',
         body: JSON.stringify({
           message,
-          provider: "nemotron",
+          provider: "gemini",
           model: null,
           document_id: documentId,
           history: history,

@@ -1,15 +1,26 @@
 """
-GHOST — live task entry point (M3-H step 4).
+GHOST — live task entry point (M3-H step 4, M4 step 8).
 
 Connects the live application to the planning/task
 architecture:
 
-  user request -> API -> Planner -> TaskService
+  user request -> API -> AgentPipeline
+    -> Planner -> ExecutionSpec -> SkillStage
+    -> TaskRunner -> AutomationEngine -> Agent
+    -> PermissionPolicy -> ToolRegistry
+    -> Reflection -> MemoryBridge -> AuditLog
 
 Boundaries honored here:
+- This module is an HTTP adapter, not an orchestrator: the
+  pipeline owns the stage order, and every component it uses
+  is the shared singleton from backend.core.agent_services
+  (no second planner, task store, runner or registry).
 - The ONLY model access is the existing orchestrator
   gateway singleton (backend.core.services). No new
   provider, no second orchestrator.
+- One request is awaited, never blocked: no asyncio.run(),
+  no nested event loop, no thread bridge, so a plan that
+  calls the model gateway cannot stall the server loop.
 - A ready plan whose steps name registered tools is
   executed through the existing TaskRunner -> Agent ->
   PermissionPolicy -> ToolRegistry pipeline: SAFE steps
@@ -32,20 +43,22 @@ import logging
 from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel
 
+from backend.agents.pipeline import AgentPipeline
 from backend.approval.service import (
     ApprovalDeniedError,
     ApprovalRequiredError,
 )
 from backend.core.agent_services import (
     approval_service,
-    automation_engine,
+    audit_log,
+    memory_bridge,
+    planner,
     reflection_engine,
+    skill_stage,
+    task_runner,
+    task_service,
     tool_registry,
 )
-from backend.core.planner import Planner
-from backend.core.services import orchestrator
-from backend.tasks import TaskService
-from backend.tasks.runner import TaskRunner
 
 
 logger = logging.getLogger(
@@ -60,32 +73,31 @@ router = APIRouter(
 
 
 # ============================================================
-# SINGLETONS (reused / single instances only)
+# PIPELINE WIRING
 # ============================================================
-#
-# Planner rides on the one existing model gateway;
-# task_service is the one in-process task store for
-# this entry point (M3-H step 2 component).
 
-planner = Planner(
-    orchestrator,
-    tool_catalog=[
-        tool.name for tool in tool_registry.list_tools()
-    ],
-)
+def build_pipeline() -> AgentPipeline:
+    """
+    Compose the agent chain from this module's component
+    singletons.
 
-task_service = TaskService()
+    The stages themselves live in backend.core.agent_services;
+    this function only names their order for one request. The
+    components are read here (not captured at import time) so a
+    caller — a test, or a future request-scoped wiring — can
+    substitute one component without mutating process state.
+    """
 
-# M3-H step 5: approval/resume glue over the same task
-# store, the production automation engine, and the one
-# shared approval service (whose grants the production
-# PermissionPolicy consumes).
-task_runner = TaskRunner(
-    task_service=task_service,
-    automation_engine=automation_engine,
-    approvals=approval_service,
-    reflection_engine=reflection_engine,
-)
+    return AgentPipeline(
+        planner=planner,
+        task_service=task_service,
+        task_runner=task_runner,
+        tool_registry=tool_registry,
+        skill_stage=skill_stage,
+        reflection_engine=reflection_engine,
+        memory_bridge=memory_bridge,
+        audit=audit_log,
+    )
 
 
 # ============================================================
@@ -121,7 +133,8 @@ async def create_task_from_request(
 ):
     """
     Plan a user request, then — only when the plan is
-    ready — create and store a Task.
+    ready — create, store and run its task through the
+    agent pipeline.
 
     Outcomes (deterministic, auditable):
     - 201 {"status": "created", "task_id": ...}   ready plan, task stored
@@ -147,34 +160,28 @@ async def create_task_from_request(
         else None
     )
 
-    planning = await planner.plan(
+    outcome = await build_pipeline().handle_request(
         request_text,
         memory_context=body.memory_context,
         document_context=body.document_context,
         conversation_history=history,
     )
 
+    planning = outcome.planning
+
     # --------------------------------------------------------
     # Clarification round: represented cleanly, nothing
     # created, nothing executed.
     # --------------------------------------------------------
 
-    if not planning.ready:
+    if outcome.clarification_required:
         return {
             "status": "clarification_required",
             "questions": planning.questions,
             "planning": planning.to_dict(),
         }
 
-    # --------------------------------------------------------
-    # Ready plan: store the task (PENDING — execution is a
-    # separate, permission-gated step elsewhere).
-    # --------------------------------------------------------
-
-    task = task_service.create(
-        title=planning.task_title or request_text,
-        description=planning.task_description or request_text,
-    )
+    task = outcome.task
 
     logger.info(
         "Task planned and created id=%s source=%s "
@@ -189,46 +196,7 @@ async def create_task_from_request(
     # 200 clarification round above.
     response.status_code = 201
 
-    # --------------------------------------------------------
-    # Execute the ready plan through the existing
-    # Agent -> PermissionPolicy -> ToolRegistry pipeline.
-    # Only steps naming a registered tool become real work;
-    # tool-less steps are advisory and are dropped here
-    # (never silently executed). Execution may pause on a
-    # SENSITIVE step (approval flow) or fail closed.
-    # --------------------------------------------------------
-
-    from backend.automation.engine import TaskStep
-
-    executable = [
-        TaskStep(
-            tool_name=step.tool,
-            params=step.params,
-            order=index,
-            title=step.description,
-        )
-        for index, step in enumerate(planning.steps)
-        if step.tool
-    ]
-
-    execution = None
-
-    if executable:
-
-        try:
-
-            execution = task_runner.start(
-                task_id=task.id,
-                steps=executable,
-            )
-
-        except ValueError as error:
-
-            logger.error(
-                "Task %s execution could not start: %s",
-                task.id,
-                error,
-            )
+    execution = outcome.execution
 
     return {
         "status": "created",
@@ -243,6 +211,7 @@ async def create_task_from_request(
         "planning": planning.to_dict(),
         "execution": execution,
     }
+
 
 
 @router.get("/tasks")
@@ -297,7 +266,7 @@ async def get_task(task_id: str):
 
 
 # ============================================================
-# APPROVAL + RESUME (M3-H step 5)
+# APPROVAL + RESUME (M3-H step 5, M4 step 8)
 # ============================================================
 #
 # Decision and execution are separate, explicit steps:
@@ -306,6 +275,8 @@ async def get_task(task_id: str):
 # continues an approved workflow through the normal
 # Agent -> PermissionPolicy -> ToolRegistry path. No
 # arbitrary tool execution exists on either endpoint.
+# The pipeline adds the audit/memory record around those
+# runner calls; it changes no decision and no shape.
 
 @router.get("/approvals")
 async def list_pending_approvals():
@@ -332,6 +303,8 @@ async def decide_approval(
     refused (409) — no silent overrides.
     """
 
+    pipeline = build_pipeline()
+
     try:
         record = approval_service.decide(
             approval_id,
@@ -348,11 +321,15 @@ async def decide_approval(
             detail=str(error),
         )
 
+    # ApprovalService owns the decision record; the pipeline
+    # only puts the event on the audit trail.
+    pipeline.record_approval_decision(record)
+
     if not body.approved:
         # The decision itself remains in ApprovalService. The
         # runner records the corresponding terminal workflow
         # state and passes its real denial artifact to reflection.
-        task_runner.finalize_denied_approval(approval_id)
+        await pipeline.finalize_denied_approval(approval_id)
 
     logger.info(
         "Approval %s decided status=%s task=%s tool=%s",
@@ -380,7 +357,7 @@ async def resume_task(task_id: str):
     """
 
     try:
-        outcome = task_runner.resume(task_id)
+        outcome = await build_pipeline().resume(task_id)
     except KeyError:
         raise HTTPException(
             status_code=404,

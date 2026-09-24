@@ -85,7 +85,7 @@ class ChatRequest(BaseModel):
 
     message: str
 
-    provider: str = "nemotron"
+    provider: str = "gemini"
 
     model: str | None = None
 
@@ -976,6 +976,23 @@ async def chat(
             detail=str(error),
         )
 
+    provider_name = request.provider or "gemini"
+
+    # Nemotron-specific defaults stay on Nemotron; other
+    # providers (Gemini) keep their own configured model.
+    if request.model:
+        chat_model = request.model
+    elif provider_name == "nemotron":
+        chat_model = nvidia_model
+    else:
+        chat_model = None
+
+    logger.info(
+        "[ENMA PROVIDER] provider=%s model=%s",
+        provider_name,
+        chat_model or "<provider default>",
+    )
+
     # ========================================================
     # MEMORY
     # ========================================================
@@ -1705,22 +1722,23 @@ async def chat(
             # Generate AI response
             # ------------------------------------------------
 
+            generate_kwargs = {
+                "max_tokens": 2048,
+                "temperature": 0.0,
+            }
+
+            if provider_name == "nemotron":
+                generate_kwargs["chat_template_kwargs"] = {
+                    "enable_thinking": False,
+                }
+
             async for chunk in (
                 provider.generate_stream(
                     messages=request_messages,
 
-                    model=(
-                        request.model
-                        or nvidia_model
-                    ),
+                    model=chat_model,
 
-                    max_tokens=2048,
-
-                    temperature=0.0,
-
-                    chat_template_kwargs={
-                        "enable_thinking": False,
-                    },
+                    **generate_kwargs,
                 )
             ):
 

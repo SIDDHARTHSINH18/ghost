@@ -26,6 +26,17 @@ os.environ.setdefault(
     ),
 )
 
+# M4: keep the append-only audit store off the real
+# backend/data/audit.jsonl, exactly like GHOST_MEMORY_PATH
+# does for memory.
+os.environ.setdefault(
+    "GHOST_AUDIT_PATH",
+    str(
+        Path(tempfile.gettempdir())
+        / "ghost-test-audit.jsonl"
+    ),
+)
+
 os.environ.setdefault(
     "NVIDIA_API_KEY",
     "test-key-not-real",

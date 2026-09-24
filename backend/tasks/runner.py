@@ -60,6 +60,31 @@ class TaskRunner:
         record) on the first SENSITIVE step.
         """
 
+        task, steps = self._prepare_start(task_id, steps)
+
+        self._workflows[task_id] = steps
+
+        return self._run(task, steps)
+
+    async def start_async(self, task_id: str, steps: list) -> dict:
+        """
+        Async twin of start() (M4 step 3) for workflows that
+        include model-gateway steps.
+
+        Start validation is shared with the synchronous path by
+        construction — both call _prepare_start — so an async
+        start can never be more permissive than a sync one.
+        """
+
+        task, steps = self._prepare_start(task_id, steps)
+
+        self._workflows[task_id] = steps
+
+        return await self._run_async(task, steps)
+
+    def _prepare_start(self, task_id: str, steps: list):
+        """Shared start gate. Raises exactly as before."""
+
         task = self._tasks.get(task_id)
 
         if task.status != TaskStatus.PENDING:
@@ -75,14 +100,34 @@ class TaskRunner:
                 f"Task '{task_id}' has no steps to execute."
             )
 
-        self._workflows[task_id] = steps
-
-        return self._run(task, steps)
+        return task, steps
 
     def resume(self, task_id: str) -> dict:
         """
         Continue a paused workflow after explicit approval.
         Refuses safely when anything is not exactly right.
+        """
+
+        task, remaining = self._prepare_resume(task_id)
+
+        return self._run(task, remaining)
+
+    async def resume_async(self, task_id: str) -> dict:
+        """
+        Async twin of resume(). The approval gate is the shared
+        _prepare_resume(), so a resume can never bypass the
+        grant requirement just because it runs asynchronously.
+        """
+
+        task, remaining = self._prepare_resume(task_id)
+
+        return await self._run_async(task, remaining)
+
+    def _prepare_resume(self, task_id: str):
+        """
+        Shared resume gate: task state, pending step, and the
+        explicit GRANTED approval requirement. Raises exactly
+        the same errors in the same order as before.
         """
 
         task = self._tasks.get(task_id)
@@ -157,7 +202,7 @@ class TaskRunner:
             if step.status != TaskStatus.COMPLETED
         ]
 
-        return self._run(task, remaining)
+        return task, remaining
 
     def finalize_denied_approval(self, approval_id: str) -> dict:
         """Terminalize the exact paused workflow step after a human denial.
@@ -233,13 +278,49 @@ class TaskRunner:
 
     # --------------------------------------------------------
 
+    def planned_steps(self, task_id: str) -> list:
+        """
+        One task's recorded workflow steps, in plan order.
+
+        The returned list is a copy; the TaskStep objects are the
+        same ones the engine updates, so a caller can read what
+        ran (for reporting or auditing) without depending on
+        runner internals. No step is executed or altered here.
+        """
+
+        steps = self._workflows.get(task_id) or []
+
+        return sorted(steps, key=lambda step: step.order)
+
     def _run(self, task, steps: list) -> dict:
         """
         One engine pass. Always through the existing
         Agent -> PermissionPolicy -> ToolRegistry path.
         """
 
-        result = self._engine.run(task, steps)
+        return self._outcome(
+            task,
+            self._engine.run(task, steps),
+        )
+
+    async def _run_async(self, task, steps: list) -> dict:
+        """
+        One async engine pass through the same shared
+        Agent -> PermissionPolicy -> ToolRegistry path.
+        """
+
+        return self._outcome(
+            task,
+            await self._engine.run_async(task, steps),
+        )
+
+    def _outcome(self, task, result: AutomationResult) -> dict:
+        """
+        Post-execution bookkeeping, shared by both passes:
+        reflection, approval-record creation on PAUSE, and the
+        runner's result envelope. Identical for sync and async,
+        so neither path can drift.
+        """
 
         # Reflection is strictly post-execution and read-only. It
         # receives the AutomationResult produced by the real Agent /

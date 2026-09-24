@@ -21,8 +21,12 @@ and this module creates none.
 """
 
 from backend.agents.executor import Agent
+from backend.agents.memory_bridge import MemoryBridge
 from backend.approval.service import ApprovalService
 from backend.automation.engine import AutomationEngine
+from backend.audit.log import AuditLog
+from backend.core.planner import Planner
+from backend.core.services import memory_service, orchestrator
 from backend.permissions.policy import PermissionPolicy
 from backend.reflection.engine import ReflectionEngine
 from backend.skills.builtin import register_builtin_skills
@@ -30,11 +34,15 @@ from backend.skills.loader import SkillLoader
 from backend.skills.registry import SkillRegistry
 from backend.skills.router import SkillRouter
 from backend.skills.runner import SkillRunner
+from backend.skills.stage import SkillStage
+from backend.tasks import TaskService
+from backend.tasks.runner import TaskRunner
 from backend.tools.builtin.fs import (
     fs_file_exists,
     fs_list_directory,
     fs_read_file,
 )
+from backend.tools.builtin.model import model_generate
 from backend.tools.registry import RiskLevel, ToolRegistry
 
 
@@ -76,6 +84,16 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
         category="filesystem",
         risk_level=RiskLevel.SAFE,
     )
+    registry.register(
+        name="model_generate",
+        description=(
+            "Ask the ENMA model for one text answer through "
+            "the shared model gateway (read-only; no files, "
+            "no side effects)."
+        ),
+        category="model",
+        risk_level=RiskLevel.SAFE,
+    )
 
 
 register_builtin_tools(tool_registry)
@@ -93,11 +111,15 @@ register_builtin_tools(tool_registry)
 # - unknown/unregistered names raise (the Agent maps
 #   the failure to a FAILED task; the PermissionPolicy
 #   has already denied them before this point anyway)
+# - an async implementation (model_generate) returns a
+#   coroutine: only Agent.execute_async() awaits it, so the
+#   synchronous path can never silently drop a model call
 
 TOOL_IMPLEMENTATIONS = {
     "fs_read_file": fs_read_file,
     "fs_list_directory": fs_list_directory,
     "fs_file_exists": fs_file_exists,
+    "model_generate": model_generate,
 }
 
 
@@ -163,4 +185,54 @@ skill_runner = SkillRunner(
     automation_engine=automation_engine,
 )
 
+# M4 step 5: the routing/execution seam that lets the task
+# pipeline use the skill system above. It holds references to
+# the existing singletons — it is not another registry,
+# router or runner.
+skill_stage = SkillStage(
+    registry=skill_registry,
+    router=skill_router,
+    runner=skill_runner,
+    tool_registry=tool_registry,
+)
+
 reflection_engine = ReflectionEngine()
+
+
+# ============================================================
+# AUDIT + MEMORY (M4 steps 1 and 6)
+# ============================================================
+
+# The single append-only audit store. GHOST_AUDIT_PATH redirects
+# it in tests, exactly like GHOST_MEMORY_PATH for memory.
+audit_log = AuditLog()
+
+memory_bridge = MemoryBridge(
+    memory=memory_service,
+    audit=audit_log,
+)
+
+
+# ============================================================
+# PLANNING + TASK STORE (M4 step 9)
+# ============================================================
+#
+# One task store and one runner for the process, assembled from
+# the singletons above. The HTTP layer imports these and names
+# their stage order; it does not build its own collaborators.
+
+planner = Planner(
+    orchestrator,
+    tool_catalog=[
+        tool.name for tool in tool_registry.list_tools()
+    ],
+)
+
+task_service = TaskService()
+
+task_runner = TaskRunner(
+    task_service=task_service,
+    automation_engine=automation_engine,
+    approvals=approval_service,
+    reflection_engine=reflection_engine,
+)

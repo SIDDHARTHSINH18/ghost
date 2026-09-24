@@ -473,6 +473,10 @@ def isolated_flow(monkeypatch):
     monkeypatch.setattr(tasks_api, "task_service", store)
     monkeypatch.setattr(tasks_api, "task_runner", runner)
     monkeypatch.setattr(tasks_api, "approval_service", approvals)
+    # The pipeline summarizes spec risk from this registry, and
+    # the isolated agent gates with it: one catalog for both, so
+    # a spec can never describe a tool this flow does not know.
+    monkeypatch.setattr(tasks_api, "tool_registry", registry)
     # The production policy must consume the SAME grant
     # store the API's runner checks (single source).
     monkeypatch.setattr(

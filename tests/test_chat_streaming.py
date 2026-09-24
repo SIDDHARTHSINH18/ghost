@@ -31,9 +31,15 @@ def clean_documents():
 @pytest.fixture
 def fake_provider(monkeypatch):
     """
-    Replace the live provider's generate_stream with a
-    capturing fake. monkeypatch restores the instance
-    attribute afterwards.
+    Replace every registered provider's generate_stream with a
+    capturing fake. monkeypatch restores the instance attributes
+    afterwards.
+
+    Patching all providers (rather than one named provider) keeps
+    this fixture honest: POST /api/chat picks its own default
+    provider, and a fixture bound to a single name silently stops
+    capturing the moment that default changes — which let real
+    network calls (and provider error text) into these tests.
     """
 
     captured = {"messages": [], "calls": 0}
@@ -49,15 +55,12 @@ def fake_provider(monkeypatch):
         yield "GHOST "
         yield "test response"
 
-    provider = orchestrator.get_provider(
-        "nemotron",
-    )
-
-    monkeypatch.setattr(
-        provider,
-        "generate_stream",
-        fake_generate_stream,
-    )
+    for provider in orchestrator.providers.values():
+        monkeypatch.setattr(
+            provider,
+            "generate_stream",
+            fake_generate_stream,
+        )
 
     return captured
 

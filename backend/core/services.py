@@ -21,6 +21,7 @@ from backend.core.retriever import DocumentRetriever
 from backend.providers.openai_compatible import (
     OpenAICompatibleProvider,
 )
+from backend.providers.gemini import GeminiProvider
 
 
 # The project .env is the intended source of truth for provider
@@ -68,7 +69,7 @@ context_optimizer = ContextOptimizer(
 )
 
 orchestrator = Orchestrator(
-    default_provider="nemotron",
+    default_provider="gemini",
 )
 
 
@@ -96,6 +97,17 @@ orchestrator.register_provider(
         ),
     ),
 )
+
+
+# ============================================================
+# GEMINI PROVIDER
+# ============================================================
+
+orchestrator.register_provider(
+    "gemini",
+    GeminiProvider(),
+)
+
 
 document_summarizer = DocumentSummarizer(
     provider=orchestrator.get_provider(
