@@ -49,6 +49,7 @@ from backend.approval.service import (
     ApprovalDeniedError,
     ApprovalRequiredError,
 )
+from backend.audit.log import AuditStage
 from backend.core.agent_services import (
     approval_service,
     audit_log,
@@ -401,6 +402,75 @@ async def decide_approval(
         "task_id": record.task_id,
         "tool_name": record.tool_name,
         "decided_at": record.decided_at,
+    }
+
+
+@router.post("/tasks/{task_id}/cancel")
+async def cancel_task(task_id: str, http_request: Request):
+    """
+    Cancel a PENDING or RUNNING task. Ownership is enforced:
+    a foreign task is indistinguishable from an unknown one.
+    A RUNNING task is cancelled cooperatively — the engine
+    stops at the next step boundary (documented limitation).
+    """
+
+    try:
+        task = task_service.cancel(task_id, owner=_owner(http_request))
+    except KeyError:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Task '{task_id}' not found.",
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error))
+
+    audit_log.append(
+        task.id,
+        AuditStage.LIFECYCLE,
+        event="task_cancelled",
+        status=task.status.value,
+        data={"by": "authenticated session"},
+    )
+
+    return {
+        "task_id": task.id,
+        "status": task.status.value,
+        "cancelled_at": task.completed_at.isoformat()
+        if task.completed_at
+        else None,
+    }
+
+
+@router.post("/tasks/{task_id}/retry")
+async def retry_task(task_id: str, http_request: Request):
+    """
+    Controlled retry: re-queue a FAILED task (FAILED -> PENDING)
+    with retry_count tracking and a hard retry limit. Execution
+    then flows through the normal planner/runner path.
+    """
+
+    try:
+        task = task_service.retry(task_id, owner=_owner(http_request))
+    except KeyError:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Task '{task_id}' not found.",
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error))
+
+    audit_log.append(
+        task.id,
+        AuditStage.LIFECYCLE,
+        event="task_retried",
+        status=task.status.value,
+        data={"retry_count": task.retry_count},
+    )
+
+    return {
+        "task_id": task.id,
+        "status": task.status.value,
+        "retry_count": task.retry_count,
     }
 
 

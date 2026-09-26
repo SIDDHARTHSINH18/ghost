@@ -78,6 +78,10 @@ class WorkflowState(Enum):
     # the workflow did not succeed: the task must not be
     # terminalized as COMPLETED by an empty loop.
     NO_STEPS = "NO_STEPS"
+    # Cooperative cancellation: a CANCELLED task is detected at
+    # step boundaries. A step already executing cannot be
+    # interrupted mid-flight — documented limitation.
+    CANCELLED = "CANCELLED"
 
 
 @dataclass
@@ -127,6 +131,21 @@ class AutomationEngine:
         task.status = TaskStatus.RUNNING
 
         for step in ordered:
+
+            # Cooperative cancellation: a cancelled task never
+            # runs another step. Cancelled is terminal. The
+            # cancel_requested flag survives the per-step status
+            # restoration the loop performs.
+            if (
+                task.status is TaskStatus.CANCELLED
+                or task.cancel_requested
+            ):
+                return AutomationResult(
+                    task_id=task.id,
+                    state=WorkflowState.CANCELLED,
+                    steps=ordered,
+                    reason="task was cancelled",
+                )
 
             # Agent.execute() correctly marks an individual
             # successful tool call COMPLETED. A workflow may
@@ -213,6 +232,18 @@ class AutomationEngine:
         task.status = TaskStatus.RUNNING
 
         for step in ordered:
+
+            # Cooperative cancellation (same as run()).
+            if (
+                task.status is TaskStatus.CANCELLED
+                or task.cancel_requested
+            ):
+                return AutomationResult(
+                    task_id=task.id,
+                    state=WorkflowState.CANCELLED,
+                    steps=ordered,
+                    reason="task was cancelled",
+                )
 
             # Same workflow-level status restoration the sync
             # path performs: a later SENSITIVE step must pause a

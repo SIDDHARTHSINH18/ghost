@@ -51,6 +51,9 @@ def status_from_workflow(state: WorkflowState) -> TaskStatus:
     if state == WorkflowState.PAUSED:
         return TaskStatus.PENDING
 
+    if state == WorkflowState.CANCELLED:
+        return TaskStatus.CANCELLED
+
     return TaskStatus.FAILED
 
 

@@ -13,9 +13,15 @@ Dependency direction is one-way:
 Never the reverse.
 """
 
-from typing import Dict, List
+from datetime import datetime
+from typing import Any, Dict, List
 
-from backend.core.task import Task
+from backend.core.task import (
+    Task,
+    TaskStatus,
+    can_transition,
+    MAX_TASK_RETRIES,
+)
 
 
 class TaskService:
@@ -101,3 +107,109 @@ class TaskService:
 
     def count(self) -> int:
         return len(self._tasks)
+
+    # --------------------------------------------------------
+    # Lifecycle (M3): every status change is validated against
+    # the explicit state machine; timestamps and audit-friendly
+    # fields are maintained here, never at call sites.
+    # --------------------------------------------------------
+
+    def _transition(
+        self,
+        task: Task,
+        new_status: TaskStatus,
+    ) -> Task:
+        if not can_transition(task.status, new_status):
+            raise ValueError(
+                f"Invalid task transition: "
+                f"{task.status.value} -> {new_status.value}."
+            )
+
+        task.status = new_status
+        task.updated_at = datetime.now()
+
+        if new_status is TaskStatus.RUNNING:
+            task.started_at = task.started_at or datetime.now()
+        elif new_status in (
+            TaskStatus.COMPLETED,
+            TaskStatus.FAILED,
+            TaskStatus.CANCELLED,
+        ):
+            task.completed_at = datetime.now()
+
+        return task
+
+    def mark_started(self, task: Task) -> Task:
+        return self._transition(task, TaskStatus.RUNNING)
+
+    def mark_completed(self, task: Task, result: Any = None) -> Task:
+        task.result = result
+        return self._transition(task, TaskStatus.COMPLETED)
+
+    def mark_failed(self, task: Task, error: str) -> Task:
+        task.error = error
+        return self._transition(task, TaskStatus.FAILED)
+
+    def cancel(
+        self,
+        task_id: str,
+        owner: str | None = None,
+    ) -> Task:
+        """
+        Cancel a PENDING or RUNNING task. Ownership rules match
+        get(). CANCELLED is terminal; a task whose workflow has
+        already reached a terminal state cannot be cancelled.
+        """
+
+        task = self.get(task_id, owner=owner)
+
+        if task.status in (
+            TaskStatus.COMPLETED,
+            TaskStatus.FAILED,
+            TaskStatus.CANCELLED,
+        ):
+            raise ValueError(
+                f"Task '{task_id}' is {task.status.value} "
+                "and cannot be cancelled."
+            )
+
+        if task.status is TaskStatus.RUNNING:
+            # Cooperative cancellation: the flag survives the
+            # engine's per-step status restoration, so the
+            # workflow stops at the next step boundary. The
+            # step currently executing runs to completion
+            # (documented limitation — no mid-step interruption).
+            task.cancel_requested = True
+
+        return self._transition(task, TaskStatus.CANCELLED)
+
+    def retry(
+        self,
+        task_id: str,
+        owner: str | None = None,
+        max_retries: int = MAX_TASK_RETRIES,
+    ) -> Task:
+        """
+        Controlled retry: only a FAILED task may be re-queued,
+        up to max_retries times. retry_count is tracked on the
+        task so the limit is auditable.
+        """
+
+        task = self.get(task_id, owner=owner)
+
+        if task.status is not TaskStatus.FAILED:
+            raise ValueError(
+                f"Task '{task_id}' is {task.status.value}; "
+                "only FAILED tasks can be retried."
+            )
+
+        if task.retry_count >= max_retries:
+            raise ValueError(
+                f"Task '{task_id}' exceeded the retry limit "
+                f"({task.retry_count}/{max_retries})."
+            )
+
+        task.retry_count += 1
+        task.error = None
+        task.completed_at = None
+        return self._transition(task, TaskStatus.PENDING)
