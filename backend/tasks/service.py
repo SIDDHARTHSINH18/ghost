@@ -34,9 +34,14 @@ class TaskService:
         self,
         title: str,
         description: str = "",
+        owner: str | None = None,
     ) -> Task:
         """
         Create and store a new Task. Returns the task.
+
+        ``owner`` is the hashed session identity of the
+        authenticated creator (None for legacy/in-process
+        tasks, which stay visible to every session).
         """
 
         if not title or not title.strip():
@@ -45,32 +50,52 @@ class TaskService:
         task = Task(
             title=title.strip(),
             description=description or "",
+            owner=owner,
         )
 
         self._tasks[task.id] = task
 
         return task
 
-    def get(self, task_id: str) -> Task:
+    def get(self, task_id: str, owner: str | None = None) -> Task:
         """
-        Return the task for a known ID. Unknown IDs
-        raise KeyError with a clear, deterministic
-        message.
+        Return the task for a known ID. Unknown IDs raise
+        KeyError. When ``owner`` is given, a task owned by a
+        DIFFERENT session also raises KeyError — callers report
+        the same 404 either way, so the existence of another
+        user's task is never revealed.
         """
 
         if task_id not in self._tasks:
             raise KeyError(f"Task '{task_id}' not found.")
 
-        return self._tasks[task_id]
+        task = self._tasks[task_id]
 
-    def list(self) -> List[Task]:
+        if (
+            owner is not None
+            and task.owner is not None
+            and task.owner != owner
+        ):
+            raise KeyError(f"Task '{task_id}' not found.")
+
+        return task
+
+    def list(self, owner: str | None = None) -> List[Task]:
         """
-        Return all stored tasks, ordered by creation
-        time (deterministic; ties broken by id).
+        Return stored tasks ordered by creation time
+        (deterministic; ties broken by id).
+
+        With ``owner``, only that owner's tasks plus legacy
+        owner-less tasks are returned.
         """
 
         return sorted(
-            self._tasks.values(),
+            (
+                task
+                for task in self._tasks.values()
+                if task.owner is None or owner is None
+                or task.owner == owner
+            ),
             key=lambda task: (task.created_at, task.id),
         )
 

@@ -43,6 +43,11 @@ from typing import Any, Dict, List, Optional
 # Environment override, mirroring GHOST_MEMORY_PATH.
 AUDIT_PATH_ENV = "GHOST_AUDIT_PATH"
 
+# Rotation: rotate the active file when it exceeds this size.
+ROTATION_MAX_BYTES_ENV = "GHOST_AUDIT_MAX_BYTES"
+
+DEFAULT_MAX_BYTES = 5 * 1024 * 1024  # 5 MiB per active file
+
 # Raw model output and document excerpts are the main
 # unbounded-risk fields.
 MAX_STRING_CHARS = 2000
@@ -88,11 +93,25 @@ _SECRET_ASSIGNMENT = re.compile(
 )
 
 # Well-known provider key prefixes, redacted wherever they
-# appear even without an assignment operator.
+# appear even without an assignment operator. Each alternative
+# is an explicit vendor format — no generic "long random
+# string" rule, so normal text is never destroyed.
 _PREFERAL_KEY = re.compile(
-    r"\b(nvapi-[A-Za-z0-9_\-]{6,}|sk-[A-Za-z0-9_\-]{6,}|"
-    r"ghp_[A-Za-z0-9]{6,}|gho_[A-Za-z0-9]{6,}|"
-    r"xox[baprs]-[A-Za-z0-9\-]{6,}|AIza[0-9A-Za-z_\-]{6,})"
+    r"\b("
+    r"nvapi-[A-Za-z0-9_\-]{6,}"
+    # Real OpenAI keys are sk- plus ~40 chars; a short minimum
+    # here destroyed ordinary hyphenated words ("sk-etching").
+    # 12 is the shortest sample any existing test depends on.
+    r"|sk-[A-Za-z0-9_\-]{12,}"
+    r"|sk-or-[A-Za-z0-9_\-]{6,}"
+    r"|gsk_[A-Za-z0-9_\-]{16,}"
+    r"|ghp_[A-Za-z0-9]{6,}"
+    r"|gho_[A-Za-z0-9]{6,}"
+    r"|xox[baprs]-[A-Za-z0-9\-]{6,}"
+    r"|AIza[0-9A-Za-z_\-]{6,}"
+    # JWT-shaped bearer tokens (header.payload.signature).
+    r"|eyJ[A-Za-z0-9_\-]{6,}\.[A-Za-z0-9_\-]{6,}\.[A-Za-z0-9_\-]{6,}"
+    r")"
 )
 
 
@@ -145,6 +164,8 @@ class AuditLog:
         self,
         storage_path: Optional[str] = None,
         max_string_chars: int = MAX_STRING_CHARS,
+        max_bytes: Optional[int] = None,
+        max_rotations: int = 3,
     ):
         if storage_path is None:
             storage_path = os.getenv(AUDIT_PATH_ENV)
@@ -172,6 +193,20 @@ class AuditLog:
         self.storage_path = os.path.abspath(storage_path)
         self.max_string_chars = int(max_string_chars)
 
+        # Size-based rotation. GHOST_AUDIT_MAX_BYTES follows
+        # the existing GHOST_* env convention.
+        if max_bytes is None:
+            try:
+                max_bytes = int(
+                    os.getenv(ROTATION_MAX_BYTES_ENV, "")
+                    or DEFAULT_MAX_BYTES
+                )
+            except ValueError:
+                max_bytes = DEFAULT_MAX_BYTES
+
+        self.max_bytes = max(1024, int(max_bytes))
+        self.max_rotations = max(1, int(max_rotations))
+
         directory = os.path.dirname(self.storage_path)
 
         if directory:
@@ -186,6 +221,47 @@ class AuditLog:
     # --------------------------------------------------------
     # WRITE PATH (append only)
     # --------------------------------------------------------
+
+    def _rotate_locked(self) -> None:
+        """
+        Shift audit.jsonl -> audit.jsonl.1 -> ... -> .N when the
+        active file exceeds max_bytes. History is never deleted:
+        the oldest rotated file beyond max_rotations is renamed
+        forward and dropped only after max_rotations generations
+        exist. Any rotation failure is swallowed — auditing must
+        never break the pipeline it audits; the oversized file
+        simply keeps receiving rows until rotation can succeed.
+        """
+
+        try:
+            if (
+                not os.path.exists(self.storage_path)
+                or os.path.getsize(self.storage_path) < self.max_bytes
+            ):
+                return
+
+            oldest = (
+                f"{self.storage_path}.{self.max_rotations}"
+            )
+
+            if os.path.exists(oldest):
+                os.remove(oldest)
+
+            for index in range(self.max_rotations - 1, 0, -1):
+                source = f"{self.storage_path}.{index}"
+
+                if os.path.exists(source):
+                    os.replace(
+                        source,
+                        f"{self.storage_path}.{index + 1}",
+                    )
+
+            os.replace(
+                self.storage_path,
+                f"{self.storage_path}.1",
+            )
+        except OSError:
+            return
 
     def append(
         self,
@@ -209,6 +285,8 @@ class AuditLog:
         # agree — an interleaved pair could otherwise emit
         # sequence 2 before sequence 1.
         with self._lock:
+            self._rotate_locked()
+
             row = {
                 "sequence": self._take_sequence_locked(),
                 "timestamp": timestamp or self._now(),

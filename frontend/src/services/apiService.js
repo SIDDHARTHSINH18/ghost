@@ -1,4 +1,5 @@
-import { API_URL, AUTH_TOKEN_KEY } from '../utils/constants';
+import { API_URL } from '../utils/constants';
+import authService from './authService';
 
 /**
  * Centralized API service for making authenticated requests to the GHOST backend
@@ -11,7 +12,9 @@ const apiService = {
    * @returns {Promise<Response>} - Fetch response
    */
   authFetch: async (endpoint, options = {}) => {
-    const token = localStorage.getItem(AUTH_TOKEN_KEY);
+    // Single token source: authService owns the session
+    // token (sessionStorage). Never read another store here.
+    const token = authService.getToken();
     const headers = {
       'Content-Type': 'application/json',
       ...options.headers,
@@ -26,11 +29,10 @@ const apiService = {
       headers,
     });
 
-    // Handle 401 Unauthorized - token might be expired
+    // Handle 401 Unauthorized - token might be expired.
+    // Credential storage is owned by authService; this layer
+    // only signals the expiry event.
     if (response.status === 401) {
-      // Clear invalid token
-      localStorage.removeItem(AUTH_TOKEN_KEY);
-      // Optionally redirect to login or trigger auth refresh
       window.dispatchEvent(new Event('authExpired'));
     }
 
@@ -116,7 +118,7 @@ const apiService = {
    * @returns {Promise<any>} - Parsed JSON response
    */
   upload: async (formData) => {
-    const token = localStorage.getItem(AUTH_TOKEN_KEY);
+    const token = authService.getToken();
     const headers = {};
     
     if (token) {

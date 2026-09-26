@@ -5,13 +5,17 @@ fs_read_file: read a local text file. Read-only.
 
 Safety constraints, enforced HERE in code (treat params
 as untrusted model output):
-- path must be a non-empty absolute path string
-- path must exist and be a regular file (no dirs, no
+- path may be absolute, or relative: it is resolved against
+  the canonical execution root by the centralized resolver
+- relative paths may never traverse above the canonical root
+  (textual ".." escapes are rejected before any filesystem
+  access)
+- path must exist and be a regular file / directory (no
   device/symlink tricks via isfile + islink rejection)
 - file size must be <= MAX_FILE_SIZE_BYTES
 - decoded as UTF-8 with errors="replace" (never raises
   on binary junk; result is always deterministic text)
-- no writing, no globbing, no traversal logic, no shell
+- no writing, no globbing, no shell
 """
 
 import os
@@ -20,18 +24,86 @@ from pathlib import Path
 
 MAX_FILE_SIZE_BYTES = 1024 * 1024  # 1 MB
 
+# Optional override of the canonical execution root (e.g. a
+# packaged runtime whose working directory differs). Unset by
+# default; the repository root is derived from this file's
+# location using the same convention as backend/core/memory.py
+# and backend/audit/log.py.
+WORKSPACE_ROOT_ENV = "ENMA_WORKSPACE_ROOT"
+
 
 class ToolExecutionError(Exception):
     """Raised for any invalid/unreadable path so the
     Agent maps it to a FAILED task with this message."""
 
 
-def _validated_absolute_path(params: dict, tool_name: str) -> tuple[str, Path]:
-    """Validate the shared untrusted ``path`` parameter.
+def canonical_execution_root() -> Path:
+    """
+    The canonical project/execution root every relative tool
+    path resolves against.
 
-    The tools deliberately reject a symlink at the requested path rather
-    than resolving it, so a caller cannot use these read-only tools to
-    follow an indirect filesystem reference.
+    ENMA_WORKSPACE_ROOT wins when set; otherwise the repository
+    root is derived from this file's location
+    (backend/tools/builtin/fs.py -> project root), matching the
+    existing memory/audit storage convention. No personal or
+    machine-specific path is hardcoded.
+    """
+
+    override = os.getenv(WORKSPACE_ROOT_ENV, "").strip()
+
+    if override:
+        return Path(os.path.abspath(override))
+
+    return Path(
+        os.path.abspath(
+            os.path.join(
+                os.path.dirname(__file__),
+                "..",
+                "..",
+                "..",
+            )
+        )
+    )
+
+
+def resolve_tool_path(raw_path: str) -> tuple[str, Path]:
+    """
+    Centralized safe path resolver at the filesystem execution
+    boundary.
+
+    - already-absolute paths are preserved unchanged;
+    - relative paths ("." , "./x", "folder/x") resolve against
+      the canonical execution root and are then jailed to it:
+      any textual ".." escape that lands outside the root is
+      rejected before touching the filesystem;
+    - the result is normalized without resolving symlinks (the
+      symlink refusal below stays intact).
+
+    Returns (display_path, normalized Path).
+    """
+
+    root = canonical_execution_root()
+
+    if os.path.isabs(raw_path):
+        resolved = Path(os.path.normpath(raw_path))
+    else:
+        resolved = Path(os.path.normpath(root / raw_path))
+
+        if resolved != root and root not in resolved.parents:
+            raise ToolExecutionError(
+                f"Path escapes the execution root: '{raw_path}'."
+            )
+
+    return str(resolved), resolved
+
+
+def _validated_path(params: dict, tool_name: str) -> tuple[str, Path]:
+    """Validate and resolve the shared untrusted ``path`` parameter.
+
+    Relative paths resolve against the canonical execution root.
+    The tools deliberately reject a symlink at the requested path
+    rather than resolving it, so a caller cannot use these
+    read-only tools to follow an indirect filesystem reference.
     """
 
     raw_path = params.get("path") if isinstance(params, dict) else None
@@ -41,14 +113,26 @@ def _validated_absolute_path(params: dict, tool_name: str) -> tuple[str, Path]:
             f"{tool_name} requires a 'path' parameter."
         )
 
-    path = raw_path.strip()
+    path, path_obj = resolve_tool_path(raw_path.strip())
 
-    if not os.path.isabs(path):
-        raise ToolExecutionError(
-            f"Path must be absolute: '{path}'."
-        )
+    # Error privacy: for paths inside the execution root,
+    # report them root-relative ("./sub/missing") instead of
+    # the absolute host location — task errors can be echoed
+    # back through APIs/UIs. Absolute outside paths keep their
+    # sanctioned absolute form.
+    root = canonical_execution_root()
 
-    path_obj = Path(path)
+    if path_obj == root or root in path_obj.parents:
+        try:
+            relative = path_obj.relative_to(root)
+
+            path = (
+                "."
+                if not relative.parts
+                else "./" + str(relative)
+            )
+        except ValueError:
+            pass
 
     if path_obj.is_symlink():
         raise ToolExecutionError(
@@ -62,30 +146,12 @@ def fs_read_file(params: dict) -> str:
     """
     Read one local text file.
 
-    params: {"path": <absolute filesystem path>}
+    params: {"path": <filesystem path, absolute or relative to
+             the canonical execution root>}
     Returns the decoded file contents.
     """
 
-    raw_path = params.get("path") if isinstance(params, dict) else None
-
-    if not isinstance(raw_path, str) or not raw_path.strip():
-        raise ToolExecutionError(
-            "fs_read_file requires a 'path' parameter."
-        )
-
-    path = raw_path.strip()
-
-    if not os.path.isabs(path):
-        raise ToolExecutionError(
-            f"Path must be absolute: '{path}'."
-        )
-
-    path_obj = Path(path)
-
-    if path_obj.is_symlink():
-        raise ToolExecutionError(
-            f"Refusing to follow symbolic link: '{path}'."
-        )
+    path, path_obj = _validated_path(params, "fs_read_file")
 
     if not path_obj.exists():
         raise ToolExecutionError(
@@ -128,7 +194,7 @@ def fs_list_directory(params: dict) -> list[str]:
     requested directory itself must be an existing, non-symlink directory.
     """
 
-    path, path_obj = _validated_absolute_path(
+    path, path_obj = _validated_path(
         params,
         "fs_list_directory",
     )
@@ -158,7 +224,7 @@ def fs_file_exists(params: dict) -> bool:
     contents are opened or read.
     """
 
-    _, path_obj = _validated_absolute_path(
+    _, path_obj = _validated_path(
         params,
         "fs_file_exists",
     )

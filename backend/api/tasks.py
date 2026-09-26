@@ -40,10 +40,11 @@ Boundaries honored here:
 
 import logging
 
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from backend.agents.pipeline import AgentPipeline
+from backend.core.security import hash_session_token
 from backend.approval.service import (
     ApprovalDeniedError,
     ApprovalRequiredError,
@@ -75,6 +76,36 @@ router = APIRouter(
 # ============================================================
 # PIPELINE WIRING
 # ============================================================
+
+def _owner(http_request: Request) -> str | None:
+    """
+    Hashed session identity for the authenticated caller.
+    None when no session token is present (TestClient/public
+    path) — ownership checks then treat tasks as legacy.
+    """
+
+    token = getattr(
+        http_request.state,
+        "session_token",
+        "",
+    )
+
+    return hash_session_token(token) if token else None
+
+
+def _approval_visible(record, owner: str | None) -> bool:
+    """An approval is visible only to its task's owner."""
+
+    if owner is None:
+        return True
+
+    try:
+        task = task_service.get(record.task_id, owner=owner)
+    except KeyError:
+        return False
+
+    return True
+
 
 def build_pipeline() -> AgentPipeline:
     """
@@ -130,6 +161,7 @@ class ApprovalDecision(BaseModel):
 async def create_task_from_request(
     body: TaskRequest,
     response: Response,
+    http_request: Request,
 ):
     """
     Plan a user request, then — only when the plan is
@@ -165,6 +197,7 @@ async def create_task_from_request(
         memory_context=body.memory_context,
         document_context=body.document_context,
         conversation_history=history,
+        owner=_owner(http_request),
     )
 
     planning = outcome.planning
@@ -215,10 +248,10 @@ async def create_task_from_request(
 
 
 @router.get("/tasks")
-async def list_tasks():
+async def list_tasks(http_request: Request):
     """List all stored tasks (metadata only)."""
 
-    tasks = task_service.list()
+    tasks = task_service.list(owner=_owner(http_request))
 
     return {
         "tasks": [
@@ -236,12 +269,14 @@ async def list_tasks():
 
 
 @router.get("/tasks/{task_id}")
-async def get_task(task_id: str):
+async def get_task(task_id: str, http_request: Request):
     """Return one stored task by ID."""
 
     try:
-        task = task_service.get(task_id)
+        task = task_service.get(task_id, owner=_owner(http_request))
     except KeyError:
+        # Same 404 for unknown IDs and other users' tasks: the
+        # existence of a foreign task is never revealed.
         raise HTTPException(
             status_code=404,
             detail=f"Task '{task_id}' not found.",
@@ -279,10 +314,16 @@ async def get_task(task_id: str):
 # runner calls; it changes no decision and no shape.
 
 @router.get("/approvals")
-async def list_pending_approvals():
+async def list_pending_approvals(http_request: Request):
     """List approvals awaiting a decision (audit view)."""
 
-    pending = approval_service.list_pending()
+    owner = _owner(http_request)
+
+    pending = [
+        record
+        for record in approval_service.list_pending()
+        if _approval_visible(record, owner)
+    ]
 
     return {
         "approvals": [
@@ -296,6 +337,7 @@ async def list_pending_approvals():
 async def decide_approval(
     approval_id: str,
     body: ApprovalDecision,
+    http_request: Request,
 ):
     """
     Record an explicit approval decision. Unknown IDs
@@ -304,6 +346,20 @@ async def decide_approval(
     """
 
     pipeline = build_pipeline()
+
+    try:
+        record = approval_service.get(approval_id)
+    except KeyError:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Approval '{approval_id}' not found.",
+        )
+
+    if not _approval_visible(record, _owner(http_request)):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Approval '{approval_id}' not found.",
+        )
 
     try:
         record = approval_service.decide(
@@ -349,12 +405,21 @@ async def decide_approval(
 
 
 @router.post("/tasks/{task_id}/resume")
-async def resume_task(task_id: str):
+async def resume_task(task_id: str, http_request: Request):
     """
     Resume a paused task after explicit approval. Every
     refusal reason is reported explicitly; resumption
-    always flows through PermissionPolicy.
+    always flows through PermissionPolicy. Foreign-owned
+    tasks are indistinguishable from unknown ones (404).
     """
+
+    try:
+        task_service.get(task_id, owner=_owner(http_request))
+    except KeyError:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Task '{task_id}' not found.",
+        )
 
     try:
         outcome = await build_pipeline().resume(task_id)

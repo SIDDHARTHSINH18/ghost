@@ -14,8 +14,50 @@ import { API_URL } from "./utils/constants";
 import { readJSON, saveJSON } from "./utils/helpers";
 import { buildVisualGraph } from "./utils/helpers";
 import { resolveMemoryNode } from "./utils/helpers";
-import { TASK_SIGNALS } from "./utils/constants";
+import { TASK_SIGNALS, CHAT_PROVIDER } from "./utils/constants";
 import { ZONES } from "./utils/constants";
+import CodeBlock from "./components/chat/CodeBlock";
+import TaskCard from "./components/chat/TaskCard";
+
+// Inline markdown for prose lines: `code` spans (visually
+// distinct, subtly highlighted) and **bold**. Code spans are
+// matched first so bold markers inside them are untouched.
+const INLINE_PATTERN = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)/g;
+
+function renderInline(text) {
+  const nodes = [];
+
+  let lastIndex = 0;
+  let match;
+  let key = 0;
+
+  INLINE_PATTERN.lastIndex = 0;
+
+  while ((match = INLINE_PATTERN.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      nodes.push(text.slice(lastIndex, match.index));
+    }
+
+    if (match[1] !== undefined) {
+      nodes.push(
+        <code className="ghost-inline-code" key={`code-${key}`}>
+          {match[1].slice(1, -1)}
+        </code>
+      );
+    } else {
+      nodes.push(<strong key={`bold-${key}`}>{match[2].slice(2, -2)}</strong>);
+    }
+
+    key += 1;
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (lastIndex < text.length) {
+    nodes.push(text.slice(lastIndex));
+  }
+
+  return nodes;
+}
 
 function App() {
   // State variables from original App.jsx
@@ -25,14 +67,67 @@ function App() {
   const [loginError, setLoginError] = useState("");
   const [loginLoading, setLoginLoading] = useState(false);
 
+  // First-run passphrase setup (packaged installs): the desktop
+  // layer marks config.env as setup-pending; the user then
+  // creates their own permanent ENMA passphrase.
+  const [setupMode, setSetupMode] = useState(false);
+  const [setupPassphrase, setSetupPassphrase] = useState("");
+  const [setupConfirm, setSetupConfirm] = useState("");
+  const [setupError, setSetupError] = useState("");
+  const [setupLoading, setSetupLoading] = useState(false);
+
   const graphRef = useRef(null);
   const fileInputRef = useRef(null);
 
   const [graphData, setGraphData] = useState({ nodes: [], links: [] });
   const [selectedNode, setSelectedNode] = useState(null);
   const [message, setMessage] = useState("");
-  const [messages, setMessages] = useState([]);
+  // Conversation persistence: messages (including structured
+  // taskData on task responses) survive a page refresh. The
+  // structured object is JSON-safe, so TaskCard survives too.
+  const [messages, setMessages] = useState(() =>
+    readJSON("ghost-chat-history-v1", [])
+  );
   const [loading, setLoading] = useState(false);
+
+  // Persist the conversation (with taskData) whenever it
+  // changes, bounded to the same recent window the UI uses.
+  useEffect(() => {
+    saveJSON("ghost-chat-history-v1", messages.slice(-50));
+  }, [messages]);
+
+  // First-run detection: the desktop layer reports whether this
+  // installation still needs its permanent passphrase created.
+  useEffect(() => {
+    if (authStatus === "authenticated") return;
+
+    let cancelled = false;
+
+    const checkSetupPending = async () => {
+      try {
+        const response = await fetch("/enma-backend-status");
+
+        if (response.status === 404) {
+          return; // not the desktop static server
+        }
+
+        const data = await response.json().catch(() => ({}));
+
+        if (!cancelled && data.setupPending) {
+          setSetupMode(true);
+        }
+      } catch {
+        // Static server unreachable — nothing to detect.
+      }
+    };
+
+    checkSetupPending();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authStatus]);
+
   const [uploading, setUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState("");
   const [backendOnline, setBackendOnline] = useState(false);
@@ -134,9 +229,92 @@ function App() {
       setLoginPassword("");
       setLoginError("");
     } catch (error) {
-      setLoginError(error.message || "Authentication failed.");
+      // Network-level failures ("Failed to fetch") usually mean
+      // the desktop backend is not running. The desktop layer
+      // exposes its diagnostic state on the same origin.
+      if (error.message === "Failed to fetch") {
+        let backendReason = "";
+        let backendSetupPending = false;
+
+        try {
+          const statusResponse = await fetch(
+            "/enma-backend-status"
+          );
+          const status = await statusResponse.json();
+          backendReason = status.reason || "";
+          backendSetupPending = Boolean(status.setupPending);
+        } catch {
+          // Status endpoint unavailable (e.g. Vite dev server).
+        }
+
+        if (backendSetupPending) {
+          // First run: offer the create-passphrase experience.
+          setSetupMode(true);
+        }
+
+        setLoginError(
+          "ENMA backend is not reachable at " +
+          `${API_URL}.` +
+          (backendReason ? ` ${backendReason}` : "")
+        );
+      } else {
+        setLoginError(error.message || "Authentication failed.");
+      }
     } finally {
       setLoginLoading(false);
+    }
+  }
+
+  async function completeSetup() {
+    if (setupLoading) {
+      return;
+    }
+
+    const passphrase = setupPassphrase.trim();
+    const confirm = setupConfirm.trim();
+
+    setSetupError("");
+
+    if (passphrase.length < 8) {
+      setSetupError(
+        "Passphrase must be at least 8 characters."
+      );
+      return;
+    }
+
+    if (passphrase !== confirm) {
+      setSetupError("Passphrases do not match.");
+      return;
+    }
+
+    setSetupLoading(true);
+
+    try {
+      const response = await fetch(`${API_URL}/api/auth/setup`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          passphrase,
+          confirm,
+        }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok || !data.token) {
+        throw new Error(
+          data.detail || "Passphrase setup failed."
+        );
+      }
+
+      authService.setToken(data.token);
+      setAuthStatus("authenticated");
+      setSetupPassphrase("");
+      setSetupConfirm("");
+    } catch (error) {
+      setSetupError(error.message || "Passphrase setup failed.");
+    } finally {
+      setSetupLoading(false);
     }
   }
 
@@ -474,20 +652,46 @@ function App() {
         }
 
         const execution = data.execution;
-        let taskResponse = "";
+        const taskStatus = String(
+          execution?.state ||
+            execution?.status ||
+            data.task?.status ||
+            data.status ||
+            ""
+        ).toUpperCase();
 
-        if (execution?.status === "COMPLETED") {
-          taskResponse = "TASK COMPLETED\n\n" + JSON.stringify(execution, null, 2);
+        // Human-facing intro only — the structured object is
+        // rendered by TaskCard, never dumped as raw JSON.
+        let taskIntro = "Task received.";
+
+        if (taskStatus === "COMPLETED") {
+          taskIntro = "Task completed.";
         } else if (
-          execution?.status === "PENDING_APPROVAL" ||
-          execution?.status === "WAITING_FOR_APPROVAL"
+          taskStatus === "PENDING_APPROVAL" ||
+          taskStatus === "WAITING_FOR_APPROVAL" ||
+          taskStatus === "PAUSED"
         ) {
-          taskResponse = "TASK WAITING FOR APPROVAL\n\n" + JSON.stringify(execution, null, 2);
-        } else {
-          taskResponse = `TASK ${execution?.status || "CREATED"}\n\n` + JSON.stringify(data, null, 2);
+          taskIntro =
+            "This task needs your approval before it can continue.";
+        } else if (taskStatus === "FAILED") {
+          taskIntro = "The task could not be completed.";
         }
 
-        updateAssistantMessage(taskResponse, []);
+        // Temporary trace instrumentation (STEP 2): proves the
+        // task branch executes and taskData is stored on the
+        // message instead of being stringified into it. Remove
+        // during frontend cleanup.
+        console.info(
+          "[ENMA TASK] task branch reached; attaching taskData",
+          {
+            status: taskStatus,
+            hasTaskObject: Boolean(data.task),
+            keys: Object.keys(data),
+          }
+        );
+
+        updateAssistantMessage(taskIntro, [], data);
+
         setTimeout(loadGraph, 500);
         return;
       }
@@ -505,7 +709,7 @@ function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message: userMessage + contextLine,
-          provider: "gemini",
+          provider: CHAT_PROVIDER,
           model: null,
           document_id: documentId,
           history,
@@ -565,12 +769,12 @@ function App() {
     }
   }
 
-  function updateAssistantMessage(content, pages) {
+  function updateAssistantMessage(content, pages, taskData = null) {
     setMessages((prev) => {
       const updated = [...prev];
       for (let i = updated.length - 1; i >= 0; i--) {
         if (updated[i].role === "assistant") {
-          updated[i] = { ...updated[i], content, pages };
+          updated[i] = { ...updated[i], content, pages, taskData };
           break;
         }
       }
@@ -810,8 +1014,119 @@ function App() {
           >
             PERSONAL AI OPERATING SYSTEM
             <br />
-            AUTHENTICATED SESSION REQUIRED
+            {setupMode
+              ? "FIRST RUN — CREATE YOUR ENMA PASSPHRASE"
+              : "AUTHENTICATED SESSION REQUIRED"}
           </p>
+          {setupMode ? (
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              completeSetup();
+            }}
+          >
+            <label
+              style={{
+                display: "block",
+                fontSize: "11px",
+                letterSpacing: "0.18em",
+                color: "rgba(190,225,238,0.65)",
+                marginBottom: "8px",
+              }}
+            >
+              CREATE ENMA PASSPHRASE
+            </label>
+            <input
+              type="password"
+              value={setupPassphrase}
+              onChange={(event) => {
+                setSetupPassphrase(event.target.value);
+                setSetupError("");
+              }}
+              autoFocus
+              autoComplete="new-password"
+              placeholder="At least 8 characters"
+              disabled={setupLoading}
+              style={{
+                width: "100%",
+                boxSizing: "border-box",
+                background: "rgba(0,0,0,0.28)",
+                border: "1px solid rgba(0,229,255,0.22)",
+                color: "#eaffff",
+                padding: "14px 15px",
+                outline: "none",
+                fontSize: "14px",
+                marginBottom: "14px",
+              }}
+            />
+            <label
+              style={{
+                display: "block",
+                fontSize: "11px",
+                letterSpacing: "0.18em",
+                color: "rgba(190,225,238,0.65)",
+                marginBottom: "8px",
+              }}
+            >
+              CONFIRM PASSPHRASE
+            </label>
+            <input
+              type="password"
+              value={setupConfirm}
+              onChange={(event) => {
+                setSetupConfirm(event.target.value);
+                setSetupError("");
+              }}
+              autoComplete="new-password"
+              placeholder="Repeat passphrase"
+              disabled={setupLoading}
+              style={{
+                width: "100%",
+                boxSizing: "border-box",
+                background: "rgba(0,0,0,0.28)",
+                border: "1px solid rgba(0,229,255,0.22)",
+                color: "#eaffff",
+                padding: "14px 15px",
+                outline: "none",
+                fontSize: "14px",
+              }}
+            />
+            {setupError && (
+              <div
+                style={{
+                  marginTop: "12px",
+                  color: "#ff7d8d",
+                  fontSize: "12px",
+                  lineHeight: 1.5,
+                }}
+              >
+                {setupError}
+              </div>
+            )}
+            <button
+              type="submit"
+              disabled={
+                setupLoading ||
+                !setupPassphrase.trim() ||
+                !setupConfirm.trim()
+              }
+              style={{
+                width: "100%",
+                marginTop: "18px",
+                padding: "13px 16px",
+                background: "linear-gradient(135deg, rgba(0,229,255,0.18), rgba(0,229,255,0.06))",
+                border: "1px solid rgba(0,229,255,0.4)",
+                borderRadius: "0",
+                color: "#00e5ff",
+                fontSize: "13px",
+                letterSpacing: "0.2em",
+                cursor: "pointer",
+              }}
+            >
+              {setupLoading ? "SAVING..." : "CREATE & ENTER ENMA"}
+            </button>
+          </form>
+          ) : (
           <form
             onSubmit={(event) => {
               event.preventDefault();
@@ -883,6 +1198,7 @@ function App() {
               {loginLoading ? "AUTHENTICATING..." : "ENTER ENMA"}
             </button>
           </form>
+          )}
         </section>
       </main>
     );
@@ -944,25 +1260,24 @@ function App() {
                 .toLowerCase();
               const code = lines.slice(1, -1).join("\n");
 
-              if (language === "mermaid" || language === "flowchart") {
-                return (
-                  <div key={blockIndex}>
-                    {/* Mermaid diagram would be rendered here */}
-                    <div className="mermaid-placeholder">
-                      Mermaid Diagram: {language}
-                    </div>
-                  </div>
-                );
-              }
-
+            if (language === "mermaid" || language === "flowchart") {
               return (
-                <pre key={blockIndex} className="ghost-code">
-                  <div className="code-language">
-                    {language || "CODE"}
+                <div key={blockIndex}>
+                  {/* Mermaid diagram would be rendered here */}
+                  <div className="mermaid-placeholder">
+                    Mermaid Diagram: {language}
                   </div>
-                  <code>{code}</code>
-                </pre>
+                </div>
               );
+            }
+
+            return (
+              <CodeBlock
+                key={blockIndex}
+                language={language}
+                code={code}
+              />
+            );
             }
 
             const lines = block.split("\n");
@@ -991,7 +1306,7 @@ function App() {
                     return (
                       <div key={lineIndex} className="ghost-bullet">
                         <span>◆</span>
-                        <span>{value.replace(/^[-*•]\s+/, "")}</span>
+                        <span>{renderInline(value.replace(/^[-*•]\s+/, ""))}</span>
                       </div>
                     );
                   }
@@ -1004,7 +1319,7 @@ function App() {
                     return <div key={lineIndex} className="ghost-quote">{value.slice(2)}</div>;
                   }
 
-                  return <p key={lineIndex}>{value}</p>;
+                  return <p key={lineIndex}>{renderInline(value)}</p>;
                 })}
               </div>
             );

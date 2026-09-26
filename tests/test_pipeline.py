@@ -110,7 +110,7 @@ class BrokenFileStore:
         raise OSError("audit disk is full")
 
 
-def planning_with(*tools, ready=True, questions=()):
+def planning_with(*tools, ready=True, questions=(), source=None):
     return PlanningResult(
         request="do the work",
         ready=ready,
@@ -126,7 +126,7 @@ def planning_with(*tools, ready=True, questions=()):
         ],
         assumptions=["one assumption"],
         questions=list(questions),
-        source=PlanningSource.DETERMINISTIC,
+        source=source or PlanningSource.DETERMINISTIC,
     )
 
 
@@ -482,13 +482,53 @@ def test_matched_skill_runs_when_no_step_is_executable(tmp_path):
 
     assert skill_stage.executed == [("task-breakdown", outcome.task.id)]
     assert outcome.skill_result.status == TaskStatus.COMPLETED
-    assert outcome.execution is None
+    # A skill run is reported through the runner envelope shape —
+    # never execution:null.
+    assert outcome.execution is not None
+    assert outcome.execution["state"] == "COMPLETED"
+    assert outcome.execution["skill"] == "task-breakdown"
     assert outcome.task.status == TaskStatus.COMPLETED
     assert outcome.spec.skill == "task-breakdown"
 
     executed = stack.audit.read(task_id=outcome.task.id, stage=AuditStage.SKILL)
     assert [row["event"] for row in executed] == ["selected", "executed"]
     assert executed[1]["status"] == TaskStatus.COMPLETED.value
+
+
+def test_fallback_skill_completion_does_not_fabricate_success(tmp_path):
+    """
+    The live failure: model gateway error -> deterministic
+    fallback plan -> a skill matches and "completes" on the
+    advisory plan. The task must NOT read COMPLETED, and the
+    execution envelope must say why.
+    """
+
+    skill_stage = FakeSkillStage(
+        selection=SkillSelection(skill="task-breakdown", reason="match"),
+        result=SkillResult(
+            skill_name="task-breakdown",
+            status=TaskStatus.COMPLETED,
+            output=[{"order": 0, "title": "a"}],
+        ),
+    )
+    stack = build_stack(
+        tmp_path,
+        planning_with(ready=True, source=PlanningSource.FALLBACK_ERROR),
+        skill_stage=skill_stage,
+    )
+
+    outcome = run(stack.pipeline.handle_request("break this down"))
+
+    assert outcome.skill_result.status == TaskStatus.COMPLETED
+
+    # The skill ran, but the user's request was never executed:
+    # no COMPLETED on a fallback-only plan.
+    assert outcome.task.status == TaskStatus.PENDING
+
+    assert outcome.execution is not None
+    assert outcome.execution["state"] == "NO_STEPS"
+    assert outcome.execution["task_status"] == TaskStatus.PENDING.value
+    assert "advisory plan only" in outcome.execution["reason"]
 
 
 def test_skill_failure_becomes_a_recorded_result_not_a_crash(tmp_path):
@@ -518,7 +558,13 @@ def test_no_skill_and_no_tool_records_advisory_outcome(tmp_path):
 
     outcome = run(stack.pipeline.handle_request("just advise me"))
 
-    assert outcome.execution is None
+    # The advisory outcome is reported through the runner
+    # envelope shape with an explicit non-success state: an
+    # empty plan must never read as a completed execution.
+    assert outcome.execution is not None
+    assert outcome.execution["state"] == "NO_STEPS"
+    assert outcome.execution["task_status"] == TaskStatus.PENDING.value
+    assert outcome.execution["steps"] == []
     assert outcome.skill_result is None
     assert outcome.task.status == TaskStatus.PENDING
 

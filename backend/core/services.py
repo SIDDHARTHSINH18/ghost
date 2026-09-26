@@ -28,7 +28,51 @@ from backend.providers.gemini import GeminiProvider
 # credentials: override=True makes a stale/mismatched OS-level
 # NVIDIA_API_KEY (Windows user environment) lose to the .env value
 # instead of silently winning via python-dotenv's default behavior.
+#
+# Packaged runtime: the desktop layer points ENMA_CONFIG_PATH at
+# the user's private configuration file (created on first run in
+# the app's user-data directory — never inside the install tree,
+# never shipped in the installer). It is loaded first so a dev
+# .env in the working directory keeps precedence in development.
+_config_env = os.getenv("ENMA_CONFIG_PATH")
+
+# Dev .env first (found via the working directory, walking up),
+# then the packaged user configuration LAST so it is
+# authoritative for the packaged runtime.
 load_dotenv(override=True)
+
+if _config_env and os.path.isfile(_config_env):
+    load_dotenv(_config_env, override=True)
+
+# Metadata-only startup diagnostic: WHICH source supplied the
+# auth credential, never its value. Lets a user tell whether a
+# packaged install is using its private config or a development
+# .env without exposing anything sensitive.
+import logging
+import sys
+
+logging.getLogger("ghost.config").info(
+    "Config source: ENMA_CONFIG_PATH=%s; "
+    "config present=%s; "
+    "GHOST_AUTH_PASSWORD source=%s; "
+    "backend pid=%s; backend exe=%s; cwd=%s",
+    (
+        os.path.abspath(_config_env)
+        if _config_env
+        else "<unset>"
+    ),
+    bool(_config_env and os.path.isfile(_config_env)),
+    "packaged user config"
+    if (
+        _config_env
+        and os.path.isfile(_config_env)
+        and bool(os.getenv("GHOST_AUTH_PASSWORD"))
+    )
+    else "development .env / environment",
+    os.getpid(),
+    sys.executable,
+    os.getcwd(),
+)
 
 
 DEFAULT_NVIDIA_BASE_URL = (
@@ -103,6 +147,38 @@ orchestrator.register_provider(
 # GEMINI PROVIDER
 # ============================================================
 
+
+# ============================================================
+# GROQ PROVIDER (OpenAI-compatible)
+# ============================================================
+#
+# Same OpenAI-compatible abstraction as Nemotron: Groq's API is
+# wire-compatible with /chat/completions (including SSE deltas).
+# Groq requires an explicit model on every request.
+
+groq_api_key = os.getenv(
+    "GROQ_API_KEY",
+)
+
+groq_base_url = os.getenv(
+    "GROQ_BASE_URL",
+    "https://api.groq.com/openai/v1",
+)
+
+groq_model = os.getenv(
+    "GROQ_MODEL",
+    "llama-3.1-8b-instant",
+)
+
+orchestrator.register_provider(
+    "groq",
+    OpenAICompatibleProvider(
+        name="groq",
+        base_url=groq_base_url,
+        api_key=groq_api_key,
+    ),
+)
+
 orchestrator.register_provider(
     "gemini",
     GeminiProvider(),
@@ -131,15 +207,45 @@ document_summarizer = DocumentSummarizer(
 documents: dict = {}
 
 
-def provider_status() -> dict:
+def provider_status(provider_name: str | None = None) -> dict:
     """
     Report provider configuration without secrets.
 
-    Reads the environment live so startup validation
-    and /health reflect the current process state.
-    Used by backend.main (fail-fast startup) and the
-    /health endpoint.
+    ``provider_name`` selects a specific registered provider
+    (so /health/provider can report the provider chat actually
+    uses); None reports the orchestrator's default. Reads the
+    environment live so startup validation and /health reflect
+    the current process state.
     """
+
+    # The active provider is the requested one, falling back to
+    # the orchestrator's default — never a hardcoded name.
+    default_provider = (
+        provider_name
+        if provider_name and provider_name in orchestrator.providers
+        else orchestrator.default_provider
+    )
+
+    if default_provider == "groq":
+        return {
+            "provider": "groq",
+            "api_key_present": bool(os.getenv("GROQ_API_KEY")),
+            "base_url": groq_base_url,
+            "model": groq_model,
+        }
+
+    if default_provider == "gemini":
+        return {
+            "provider": "gemini",
+            "api_key_present": bool(
+                os.getenv("GEMINI_API_KEY"),
+            ),
+            "base_url": "https://generativelanguage.googleapis.com/v1beta",
+            "model": os.getenv(
+                "GEMINI_MODEL",
+                "gemini-3.5-flash",
+            ),
+        }
 
     return {
         "provider": "nemotron",

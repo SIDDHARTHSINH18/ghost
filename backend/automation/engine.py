@@ -74,6 +74,10 @@ class WorkflowState(Enum):
     COMPLETED = "COMPLETED"
     PAUSED = "PAUSED"
     FAILED = "FAILED"
+    # The plan contained no executable steps. Nothing ran, so
+    # the workflow did not succeed: the task must not be
+    # terminalized as COMPLETED by an empty loop.
+    NO_STEPS = "NO_STEPS"
 
 
 @dataclass
@@ -107,9 +111,20 @@ class AutomationEngine:
         error fields reflect the final workflow outcome.
         """
 
-        task.status = TaskStatus.RUNNING
-
         ordered = sorted(steps, key=lambda step: step.order)
+
+        if not ordered:
+            # An empty plan executed nothing. Leave the task in
+            # its pre-run (PENDING) state — a zero-iteration
+            # loop is not a successful run.
+            return AutomationResult(
+                task_id=task.id,
+                state=WorkflowState.NO_STEPS,
+                steps=[],
+                reason="plan contained no executable steps",
+            )
+
+        task.status = TaskStatus.RUNNING
 
         for step in ordered:
 
@@ -183,9 +198,19 @@ class AutomationEngine:
         TaskRunner already does.
         """
 
-        task.status = TaskStatus.RUNNING
-
         ordered = sorted(steps, key=lambda step: step.order)
+
+        if not ordered:
+            # Same semantics as run(): an empty plan executed
+            # nothing and must not read as success.
+            return AutomationResult(
+                task_id=task.id,
+                state=WorkflowState.NO_STEPS,
+                steps=[],
+                reason="plan contained no executable steps",
+            )
+
+        task.status = TaskStatus.RUNNING
 
         for step in ordered:
 

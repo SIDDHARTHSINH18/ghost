@@ -1,8 +1,10 @@
 const { app, BrowserWindow } = require("electron");
 const path = require("path");
 const http = require("http");
+const net = require("net");
 const fs = require("fs");
-const { spawn } = require("child_process");
+const { spawn, execFile } = require("child_process");
+const crypto = require("crypto");
 
 let backendProcess = null;
 let staticServer = null;
@@ -14,10 +16,13 @@ let staticPort = null;
 // stall Chromium for minutes before any window content loads.
 app.commandLine.appendSwitch("no-proxy-server");
 
-// Ports already present in the backend CORS allowlist
-// (backend/main.py). Whichever one we bind gives the renderer an
-// origin the backend accepts.
-const ALLOWED_PORTS = [5177, 5174, 5173];
+// Deterministic ENMA development ports. The frontend static
+// port is STRICT: if it is occupied, ENMA reports the conflict
+// instead of silently moving to another port. Both values are
+// in the backend CORS allowlist (backend/main.py).
+const BACKEND_HOST = "127.0.0.1";
+const BACKEND_PORT = 8000;
+const FRONTEND_PORT = 5177;
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -54,16 +59,46 @@ function backendProjectRoot() {
 // allowlist rejects, so login and every API call would fail.
 function startStaticServer(distRoot) {
   return new Promise((resolve) => {
-    const tryPort = (index) => {
-      if (index >= ALLOWED_PORTS.length) {
-        resolve(null);
-        return;
-      }
-
+    const start = () => {
       const server = http.createServer((req, res) => {
         const urlPath = decodeURIComponent(
           (req.url || "/").split("?")[0]
         );
+
+        // Desktop-layer diagnostics (metadata only, no secrets):
+        // lets the renderer tell a dead backend from an expired
+        // session.
+        if (urlPath === "/enma-backend-status") {
+          res.writeHead(200, {
+            "Content-Type": "application/json; charset=utf-8"
+          });
+
+          const configPath = path.join(
+            app.getPath("userData"),
+            "config.env"
+          );
+
+          let setupPending = false;
+
+          try {
+            setupPending = fs
+              .readFileSync(configPath, "utf-8")
+              .split(/\r?\n/)
+              .some((line) => line === "ENMA_SETUP_PENDING=1");
+          } catch {
+            // No config yet — nothing pending to report.
+          }
+
+          res.end(JSON.stringify({
+            backend: backendState,
+            reason: backendReason,
+            port: `${BACKEND_HOST}:${BACKEND_PORT}`,
+            backendPid: backendProcess ? backendProcess.pid : null,
+            configPath,
+            setupPending
+          }));
+          return;
+        }
 
         const relative =
           urlPath === "/" ? "index.html" : urlPath.replace(/^\/+/, "");
@@ -92,43 +127,235 @@ function startStaticServer(distRoot) {
         });
       });
 
-      server.on("error", () => tryPort(index + 1));
+      server.on("error", (error) => {
+        // STRICT PORT: never fall back to another port silently.
+        console.error(
+          `ENMA frontend port ${FRONTEND_PORT} is unavailable ` +
+          `(${error.code || error.message}). Close whatever is ` +
+          "using it and restart ENMA."
+        );
+        resolve(null);
+      });
 
-      server.listen(ALLOWED_PORTS[index], "127.0.0.1", () => {
+      server.listen(FRONTEND_PORT, "127.0.0.1", () => {
         staticServer = server;
-        staticPort = ALLOWED_PORTS[index];
+        staticPort = FRONTEND_PORT;
         resolve(staticPort);
       });
     };
 
-    tryPort(0);
+    start();
   });
 }
 
-function startBackend() {
+// ------------------------------------------------------------
+// Packaged runtime resolution + first-run configuration.
+// ------------------------------------------------------------
+
+let backendState = "not-started";
+let backendReason = "";
+
+// Candidates are validated by actually importing the backend's
+// required modules — a name on PATH is not proof of a working
+// runtime. ENMA_PYTHON (if set) always wins.
+function validatePython(candidate) {
+  // "python" or ["py", "-3"] — both normalized here.
+  const [file, ...prefix] = Array.isArray(candidate)
+    ? candidate
+    : [candidate];
+
+  return new Promise((resolve) => {
+    execFile(
+      file,
+      [...prefix, "-c", "import fastapi, uvicorn, dotenv"],
+      { timeout: 20000 },
+      (error) => resolve(!error)
+    );
+  });
+}
+
+async function resolvePython() {
+  const candidates = [];
+  if (process.env.ENMA_PYTHON) {
+    candidates.push(process.env.ENMA_PYTHON);
+  }
+  candidates.push("python", "py -3");
+
+  for (const candidate of candidates) {
+    const parts = candidate.split(" ");
+    const ok = await validatePython(parts);
+    if (ok) {
+      console.log(`ENMA backend runtime: ${candidate}`);
+      return parts;
+    }
+    console.warn(
+      `ENMA backend runtime candidate not usable: ${candidate}`
+    );
+  }
+
+  return null;
+}
+
+// First-run configuration: the backend refuses to start without
+// GHOST_AUTH_PASSWORD, so the desktop layer generates a strong
+// one into the user's private config file. The user may edit
+// that file (including adding provider keys) — it is never
+// shipped, never logged, and never sent to the renderer.
+function ensureBackendConfig() {
+  const configPath = path.join(
+    app.getPath("userData"),
+    "config.env"
+  );
+
+  if (!fs.existsSync(configPath)) {
+    const passphrase = crypto.randomBytes(24)
+      .toString("base64url");
+
+    fs.writeFileSync(
+      configPath,
+      [
+        "# ENMA backend configuration (created automatically",
+        "# on first run). Keep this file private.",
+        "#",
+        "# Login passphrase for the ENMA app:",
+        `GHOST_AUTH_PASSWORD=${passphrase}`,
+        "#",
+        "# First-run marker: on next launch the app asks you to",
+        "# create your own passphrase. This bootstrap value is",
+        "# then replaced by YOUR chosen passphrase.",
+        "ENMA_SETUP_PENDING=1",
+        "",
+        "# Provider keys are optional; without them the chat",
+        "# provider reports itself unreachable:",
+        "GEMINI_API_KEY=",
+        "#",
+        "# Optional Groq provider (fast demo provider):",
+        "# GROQ_API_KEY=gsk_...",
+        "",
+      ].join("\n"),
+      { encoding: "utf-8" }
+    );
+
+    console.log(
+      `ENMA first-run configuration created at ${configPath}.`
+    );
+  }
+
+  return configPath;
+}
+
+function probeBackend() {
+  // Resolves "healthy" | "foreign" | "free" for 127.0.0.1:8000.
+  return new Promise((resolve) => {
+    const socket = net.connect(BACKEND_PORT, BACKEND_HOST);
+    socket.setTimeout(1500);
+
+    const finish = (answer) => {
+      socket.destroy();
+      resolve(answer);
+    };
+
+    socket.on("connect", () => {
+      http
+        .get(
+          `http://${BACKEND_HOST}:${BACKEND_PORT}/health`,
+          (res) => {
+            res.resume();
+            // Any HTTP response means an ENMA backend already
+            // owns the port (/health is public and unauthenticated
+            // by design).
+            finish("healthy");
+          }
+        )
+        .on("error", () => finish("foreign"));
+
+      socket.setTimeout(1500, () => finish("foreign"));
+    });
+
+    socket.on("error", () => finish("free"));
+    socket.on("timeout", () => finish("free"));
+  });
+}
+
+async function startBackend() {
+  // 1. Runtime: never trust an unvalidated PATH lookup.
+  const runtime = await resolvePython();
+
+  if (!runtime) {
+    backendState = "no-runtime";
+    backendReason =
+      "No usable Python runtime with the ENMA backend " +
+      "dependencies was found. Set the ENMA_PYTHON environment " +
+      "variable to a Python interpreter that has fastapi, " +
+      "uvicorn and python-dotenv installed.";
+    console.error("ENMA BACKEND NOT STARTED. " + backendReason);
+    return;
+  }
+
+  // 2. Configuration: first-run bootstrap into the user's
+  //    private data directory (never the install tree).
+  const configPath = ensureBackendConfig();
+
+  // 3. Spawn with the resolved runtime and config path.
   backendProcess = spawn(
-    "python",
+    runtime[0],
     [
+      ...runtime.slice(1),
       "-m",
       "uvicorn",
       "backend.main:app",
       "--host",
-      "127.0.0.1",
+      BACKEND_HOST,
       "--port",
-      "8000",
+      String(BACKEND_PORT),
     ],
     {
       cwd: backendProjectRoot(),
       windowsHide: true,
+      env: {
+        ...process.env,
+        ENMA_CONFIG_PATH: configPath,
+      },
     }
   );
 
+  backendState = "running";
+  backendReason = "";
+
+  // Metadata diagnostics (never secrets): which executable and
+  // which config file this backend instance is tied to.
+  console.log(
+    `ENMA app exe: ${app.getPath("exe")}`
+  );
+  console.log(
+    `ENMA backend pid: ${backendProcess.pid}; ` +
+    `backend config: ${configPath}`
+  );
+
   backendProcess.on("error", (error) => {
-    console.error("Failed to start ENMA backend:", error);
+    backendState = "failed";
+    backendReason = `backend process error: ${error.code || error.message}`;
+    console.error(
+      "ENMA BACKEND FAILED TO START. " +
+      `Port: ${BACKEND_HOST}:${BACKEND_PORT}. ` +
+      `Reason: ${backendReason}`
+    );
   });
 
   backendProcess.on("exit", (code, signal) => {
-    console.log(`ENMA backend exited. code=${code}, signal=${signal}`);
+    if (backendState === "running") {
+      backendState = "failed";
+      backendReason =
+        `backend process exited during startup ` +
+        `(code=${code}, signal=${signal}). Check the packaged ` +
+        "Python runtime and the backend configuration file in " +
+        "the ENMA user-data directory.";
+      console.error(
+        "ENMA BACKEND EXITED. " +
+        `Port: ${BACKEND_HOST}:${BACKEND_PORT}. ` +
+        `Reason: ${backendReason}`
+      );
+    }
     backendProcess = null;
   });
 }
@@ -182,10 +409,28 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  const state = await probeBackend();
+
+  if (state === "healthy") {
+    // A current ENMA backend already owns 127.0.0.1:8000 —
+    // reuse it instead of spawning a process that cannot bind.
+    console.log(
+      `ENMA backend already running on ${BACKEND_HOST}:${BACKEND_PORT}; reusing it.`
+    );
+  } else if (state === "foreign") {
+    // STRICT PORT: never move the backend; report the conflict.
+    console.error(
+      `PORT CONFLICT: ${BACKEND_HOST}:${BACKEND_PORT} is occupied by ` +
+        "another application. ENMA will not start its backend on a " +
+        "different port. Free the port and restart ENMA."
+    );
+  } else {
+    await startBackend();
+  }
+
   await startStaticServer(frontendDistPath());
 
   createWindow();
-  startBackend();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {

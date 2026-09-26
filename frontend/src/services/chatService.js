@@ -1,4 +1,5 @@
 import apiService from './apiService';
+import { CHAT_PROVIDER } from '../utils/constants';
 
 /**
  * Service for handling chat and task messaging
@@ -61,7 +62,7 @@ const chatService = {
       // Route to chat endpoint
       const response = await apiService.post('/api/chat', {
         message,
-        provider: "gemini",
+        provider: CHAT_PROVIDER,
         model: null,
         document_id: documentId,
         history: history,
@@ -96,7 +97,7 @@ const chatService = {
         method: 'POST',
         body: JSON.stringify({
           message,
-          provider: "gemini",
+          provider: CHAT_PROVIDER,
           model: null,
           document_id: documentId,
           history: history,

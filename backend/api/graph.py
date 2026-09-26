@@ -1,11 +1,12 @@
 import logging
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
 # Singletons owned elsewhere and reused here (read-only):
 # the one task store backing /api/tasks and the one
 # production tool registry. No second instance is created.
 from backend.api.tasks import task_service
+from backend.core.security import hash_session_token
 from backend.core.agent_services import tool_registry
 from backend.core.services import documents, memory_service
 
@@ -55,7 +56,7 @@ def shorten(
 
 
 @router.get("/graph")
-async def get_graph():
+async def get_graph(http_request: Request):
     """
     Return the current GHOST knowledge/access graph.
 
@@ -329,7 +330,11 @@ async def get_graph():
     # TASKS (live task store — real planned/executed tasks)
     # ============================================================
 
-    tasks = task_service.list()
+    # Ownership: only the caller's tasks (plus legacy
+    # owner-less tasks) may appear in the graph.
+    token = getattr(http_request.state, "session_token", "")
+    owner = hash_session_token(token) if token else None
+    tasks = task_service.list(owner=owner)
 
     nodes.append({
         "id": "tasks-root",

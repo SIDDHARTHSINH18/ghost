@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { formatSourcePages } from "../../utils/helpers";
+import TaskCard from "./TaskCard";
 
 /**
  * ChatWorkspace - the dedicated conversation workspace.
@@ -73,6 +74,7 @@ export default function ChatWorkspace({
                 {item.content
                   ? renderGhostResponse(item.content)
                   : <span className="chat-streaming">▍</span>}
+                {item.taskData && <TaskCard task={item.taskData} />}
                 {item.pages && item.pages.length > 0 && (
                   <div className="chat-msg-sources">
                     <span>SOURCES</span>

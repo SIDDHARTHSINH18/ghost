@@ -32,7 +32,7 @@ Rules enforced here:
 from dataclasses import dataclass
 from typing import List, Optional
 
-from backend.audit.log import AuditLog, AuditStage
+from backend.audit.log import AuditLog, AuditStage, redact_text
 from backend.core.memory import MemoryService
 from backend.core.task import Task
 from backend.reflection.result import ReflectionOutcome, ReflectionResult
@@ -196,6 +196,13 @@ class MemoryBridge:
         if len(content) > MAX_MEMORY_CHARS:
             content = content[:MAX_MEMORY_CHARS].rstrip() + "..."
 
+        # Memory persists across sessions and is re-injected into
+        # future prompts: scrub credential-shaped text (model
+        # reflections can quote tool output containing secrets)
+        # before it leaves the write boundary. Mirrors the audit
+        # log's sanitize-before-store guarantee.
+        content = redact_text(content)
+
         return content.strip()
 
     # --------------------------------------------------------
@@ -222,6 +229,10 @@ class MemoryBridge:
                 tags=_tags(reflection),
                 metadata={
                     "task_id": task.id,
+                    "task_title": task.title,
+                    # Provenance: produced by a task's reflection,
+                    # not typed by the user.
+                    "origin": "task-execution",
                     "outcome": reflection.outcome.value,
                     "tools": _failing_tools(reflection),
                 },

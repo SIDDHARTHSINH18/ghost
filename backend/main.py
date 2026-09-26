@@ -48,12 +48,17 @@ logger = logging.getLogger(
 
 PUBLIC_PATHS = {
     "/",
+    # /health stays public: the desktop shell and local
+    # operators need a no-credential liveness check.
+    # /health/provider is protected — it discloses the
+    # active provider/model and triggers an outbound
+    # provider call.
     "/health",
-    "/health/provider",
     "/docs",
     "/redoc",
     "/openapi.json",
     "/api/auth/login",
+    "/api/auth/setup",
 }
 
 
@@ -302,7 +307,7 @@ def health():
 
 
 @app.get("/health/provider")
-async def health_provider():
+async def health_provider(http_request: Request):
     """
     Live reachability check for the configured
     provider (GET /models). Any HTTP response
@@ -310,13 +315,58 @@ async def health_provider():
     not an authentication check.
     """
 
-    provider = orchestrator.get_provider()
+    # The UI reports the provider chat actually uses: accept an
+    # explicit ?provider= request, falling back to the default.
+    requested = (
+        http_request.query_params.get("provider")
+        if http_request.query_params.get("provider")
+        in orchestrator.providers
+        else None
+    )
 
-    result = await provider.ping()
+    provider = orchestrator.get_provider(requested)
+
+    status = provider_status(requested)
+
+    # Canonical provider health interface; returns a plain
+    # bool. Any exception means "not reachable", never a
+    # failed request.
+    try:
+        reachable = bool(await provider.health_check())
+    except Exception:
+        reachable = False
+
+    # Diagnostic reason for the UI (no secrets): distinguish a
+    # quota/rate-limit rejection from an outage or a connection
+    # error, using the metadata the provider recorded during its
+    # probe.
+    reason = "ok" if reachable else "unreachable"
+
+    if not reachable:
+        status_code = getattr(
+            provider,
+            "last_health_status_code",
+            None,
+        )
+
+        if status_code == 429:
+            reason = "rate_limited"
+        elif status_code == 503:
+            reason = "unavailable"
+        elif status_code is not None:
+            reason = "error"
 
     return {
-        "provider": "nemotron",
-        **result,
+        "provider": status["provider"],
+        "model": status["model"],
+        "online": reachable,
+        "reachable": reachable,
+        "reason": reason,
+        "status_code": getattr(
+            provider,
+            "last_health_status_code",
+            None,
+        ),
     }
 
 

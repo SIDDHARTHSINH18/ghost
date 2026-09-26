@@ -76,7 +76,13 @@ def test_file_exists_reports_regular_file_presence_and_validates_paths(tmp_path)
     assert fs_file_exists({"path": str(tmp_path / "missing.txt")}) is False
     assert fs_file_exists({"path": str(tmp_path)}) is False
 
-    for params in ({"path": "relative.txt"}, {}, {"path": ""}, None):
+    # A relative path is now resolved against the canonical
+    # execution root: "relative.txt" is a valid reference to a
+    # file that does not exist, so it reports False instead of
+    # raising. Truly invalid parameters still raise.
+    assert fs_file_exists({"path": "relative.txt"}) is False
+
+    for params in ({}, {"path": ""}, None):
         with pytest.raises(ToolExecutionError):
             fs_file_exists(params)
 
@@ -131,3 +137,90 @@ def test_unknown_tool_remains_rejected_before_production_execution():
     assert result.decision is PermissionDecision.DENY
     assert result.status is TaskStatus.FAILED
     assert "Unknown tool" in result.error
+
+
+# ============================================================
+# Centralized relative-path resolution (execution boundary)
+# ============================================================
+
+def test_dot_resolves_to_canonical_root(tmp_path, monkeypatch):
+    """'.' must resolve to the canonical execution root, not 404."""
+
+    (tmp_path / "alpha.txt").write_text("a", encoding="utf-8")
+    (tmp_path / "sub").mkdir()
+    monkeypatch.setenv("ENMA_WORKSPACE_ROOT", str(tmp_path))
+
+    assert fs_list_directory({"path": "."}) == [
+        "alpha.txt",
+        "sub",
+    ]
+
+
+def test_dot_slash_relative_paths_resolve_against_root(
+    tmp_path, monkeypatch
+):
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "inner.txt").write_text(
+        "i", encoding="utf-8"
+    )
+    (tmp_path / "top.txt").write_text("t", encoding="utf-8")
+    monkeypatch.setenv("ENMA_WORKSPACE_ROOT", str(tmp_path))
+
+    assert fs_list_directory({"path": "./sub"}) == ["inner.txt"]
+    assert fs_file_exists({"path": "sub/inner.txt"}) is True
+    assert fs_read_file({"path": "./top.txt"}) == "t"
+
+
+def test_relative_traversal_above_root_is_rejected(
+    tmp_path, monkeypatch
+):
+    outside = tmp_path / ".." / "outside.txt"
+    outside.write_text("secret", encoding="utf-8")
+    monkeypatch.setenv("ENMA_WORKSPACE_ROOT", str(tmp_path / "root"))
+    (tmp_path / "root").mkdir()
+
+    for bad in (
+        "..",
+        "../outside.txt",
+        "sub/../../outside.txt",
+        ".\..\outside.txt",
+    ):
+        with pytest.raises(
+            ToolExecutionError, match="escapes the execution root"
+        ):
+            fs_list_directory({"path": bad})
+
+    # The outside file was never read.
+    assert "secret" in outside.read_text(encoding="utf-8")
+
+
+def test_absolute_paths_are_preserved_unchanged(tmp_path, monkeypatch):
+    """Pre-sanctioned absolute-path behavior must not change."""
+
+    outside = tmp_path / "absolute-outside.txt"
+    outside.write_text("reachable", encoding="utf-8")
+    monkeypatch.setenv("ENMA_WORKSPACE_ROOT", str(tmp_path / "root"))
+    (tmp_path / "root").mkdir()
+
+    # An absolute path outside the workspace root remains
+    # addressable exactly as before (permission policy still
+    # gates every real execution).
+    assert fs_read_file({"path": str(outside)}) == "reachable"
+    assert fs_list_directory({"path": str(tmp_path)}) == [
+        "absolute-outside.txt",
+        "root",
+    ]
+
+
+def test_env_override_sets_the_canonical_root(tmp_path, monkeypatch):
+    monkeypatch.setenv("ENMA_WORKSPACE_ROOT", str(tmp_path / "ws"))
+    (tmp_path / "ws").mkdir()
+    (tmp_path / "ws" / "here.txt").write_text("h", encoding="utf-8")
+
+    assert fs_list_directory({"path": "."}) == ["here.txt"]
+
+    monkeypatch.delenv("ENMA_WORKSPACE_ROOT")
+
+    # Without the override the resolver falls back to the
+    # repository root (never raises just for resolving).
+    assert fs_file_exists({"path": "."}) is False

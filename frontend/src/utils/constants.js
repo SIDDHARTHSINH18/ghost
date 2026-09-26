@@ -5,7 +5,8 @@
 /**
  * API configuration
  */
-export const API_URL = "http://127.0.0.1:8000";
+// ENMA backend base URL. Deterministic default; VITE_API_URL may override it for non-standard local setups.
+export const API_URL = import.meta.env?.VITE_API_URL || "http://127.0.0.1:8000";
 
 /**
  * LocalStorage keys
@@ -13,6 +14,11 @@ export const API_URL = "http://127.0.0.1:8000";
 export const LAYOUT_KEY = "ghost-spatial-layout-v2";
 export const ACTIVE_DOCUMENT_KEY = "ghost-active-document-v2";
 export const AUTH_TOKEN_KEY = "ghost-auth-token-v1";
+
+// Single active chat provider: every chat request and the
+// provider-status poll report THIS provider, so the UI and the
+// chat path can never disagree.
+export const CHAT_PROVIDER = "groq";
 
 /**
  * Node types and their colors for graph visualization

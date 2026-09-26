@@ -4768,3 +4768,358 @@ body {
 .drawer-footer-line {
   background: rgba(255, 255, 255, 0.06);
 }
+
+/* ============================================================
+   TASK CARD — structured presentation for /api/tasks results
+   ============================================================ */
+
+.task-card {
+  margin: 10px 0 4px;
+
+  max-width: 100%;
+
+  border: 1px solid rgba(0, 229, 255, 0.16);
+
+  border-radius: 10px;
+
+  background: rgba(2, 12, 18, 0.72);
+
+  padding: 12px 14px;
+
+  overflow: hidden;
+}
+
+.task-card-header {
+  display: flex;
+
+  align-items: center;
+
+  gap: 10px;
+
+  margin-bottom: 10px;
+
+  min-width: 0;
+}
+
+.task-card-badge {
+  flex: none;
+
+  width: 22px;
+
+  height: 22px;
+
+  display: flex;
+
+  align-items: center;
+
+  justify-content: center;
+
+  border-radius: 50%;
+
+  border: 1px solid rgba(0, 229, 255, 0.4);
+
+  color: #00e5ff;
+
+  font-size: 11px;
+
+  background: rgba(0, 229, 255, 0.08);
+}
+
+.task-card-approval .task-card-badge {
+  border-color: rgba(255, 191, 105, 0.5);
+
+  color: #ffbf69;
+
+  background: rgba(255, 191, 105, 0.08);
+}
+
+.task-card-failed .task-card-badge {
+  border-color: rgba(255, 107, 107, 0.5);
+
+  color: #ff6b6b;
+
+  background: rgba(255, 107, 107, 0.08);
+}
+
+.task-card-titles {
+  min-width: 0;
+}
+
+.task-card-title {
+  color: #dffaff;
+
+  font-size: 12.5px;
+
+  font-weight: 600;
+
+  overflow-wrap: anywhere;
+}
+
+.task-card-status {
+  color: #55c9df;
+
+  font-size: 11px;
+
+  letter-spacing: 0.04em;
+
+  text-transform: uppercase;
+
+  margin-top: 2px;
+}
+
+.task-card-grid {
+  display: grid;
+
+  grid-template-columns: repeat(
+    auto-fit,
+    minmax(150px, 1fr)
+  );
+
+  gap: 10px;
+}
+
+.task-card-section {
+  min-width: 0;
+
+  border-top: 1px solid rgba(0, 229, 255, 0.09);
+
+  padding-top: 8px;
+}
+
+.task-card-section-title {
+  color: #477c8e;
+
+  font-size: 10px;
+
+  letter-spacing: 0.09em;
+
+  margin-bottom: 4px;
+}
+
+.task-card-section-body {
+  color: #cfeef7;
+
+  font-size: 12px;
+
+  overflow-wrap: anywhere;
+}
+
+.task-card-assumptions {
+  margin-top: 6px;
+
+  color: #8fb8c4;
+
+  font-size: 11.5px;
+}
+
+.task-card-assumption {
+  overflow-wrap: anywhere;
+}
+
+.task-card-result-wrap {
+  margin-top: 10px;
+}
+
+.task-card-result {
+  white-space: pre-wrap;
+
+  overflow-wrap: anywhere;
+
+  color: #d6f4fa;
+
+  font-size: 12.5px;
+
+  line-height: 1.55;
+}
+
+.task-card-note {
+  margin-top: 10px;
+
+  color: #ffbf69;
+
+  font-size: 11.5px;
+
+  overflow-wrap: anywhere;
+}
+
+.task-card-details {
+  margin-top: 10px;
+
+  border-top: 1px solid rgba(0, 229, 255, 0.09);
+
+  padding-top: 8px;
+}
+
+.task-card-details summary {
+  color: #4d8797;
+
+  font-size: 11px;
+
+  letter-spacing: 0.05em;
+
+  cursor: pointer;
+
+  user-select: none;
+}
+
+.task-card-json {
+  margin: 8px 0 0;
+
+  padding: 10px;
+
+  max-height: 260px;
+
+  overflow: auto;
+
+  border: 1px solid rgba(0, 229, 255, 0.12);
+
+  border-radius: 8px;
+
+  background: #02090d;
+
+  color: #9fc9d4;
+
+  font-size: 10.5px;
+
+  line-height: 1.5;
+
+  white-space: pre;
+}
+
+/* ============================================================
+   CODE BLOCKS — header bar, copy button, horizontal scroll
+   ============================================================ */
+
+.ghost-code {
+  overflow-x: auto;
+
+  max-width: 100%;
+}
+
+.ghost-code code {
+  display: block;
+
+  white-space: pre;
+
+  min-width: max-content;
+}
+
+.code-header {
+  position: absolute;
+
+  left: 0;
+
+  top: 0;
+
+  width: 100%;
+
+  display: flex;
+
+  align-items: center;
+
+  justify-content: space-between;
+
+  padding: 6px 10px;
+
+  border-bottom: 1px solid rgba(0, 229, 255, 0.1);
+
+  background: rgba(0, 229, 255, 0.03);
+
+  box-sizing: border-box;
+}
+
+.code-language-label {
+  color: var(--chat-code-language-color, #4d8797);
+
+  font-size: 10px;
+
+  letter-spacing: 0.08em;
+
+  text-transform: uppercase;
+}
+
+.code-copy-btn {
+  border: 1px solid rgba(0, 229, 255, 0.25);
+
+  border-radius: 5px;
+
+  background: transparent;
+
+  color: #55c9df;
+
+  font-size: 10.5px;
+
+  padding: 2px 9px;
+
+  cursor: pointer;
+
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.code-copy-btn:hover {
+  background: rgba(0, 229, 255, 0.1);
+
+  color: #bdeff7;
+}
+
+/* ============================================================
+   INLINE CODE — subtle highlighted surface in prose
+   ============================================================ */
+
+.ghost-inline-code {
+  display: inline-block;
+
+  padding: 1px 6px;
+
+  margin: 0 1px;
+
+  border: 1px solid rgba(0, 229, 255, 0.16);
+
+  border-radius: 5px;
+
+  background: var(--chat-code-bg, #02090d);
+
+  color: var(--chat-code-color, #bdeff7);
+
+  font-size: 0.92em;
+
+  max-width: 100%;
+
+  overflow-wrap: anywhere;
+
+  vertical-align: baseline;
+}
+
+/* ============================================================
+   SYNTAX TOKENS — mapped onto the existing ENMA cyan family
+   ============================================================ */
+
+.ghost-code .tok-comment {
+  color: #4d6f7c;
+
+  font-style: italic;
+}
+
+.ghost-code .tok-string {
+  color: #7fe0b2;
+}
+
+.ghost-code .tok-number {
+  color: #e0c98f;
+}
+
+.ghost-code .tok-keyword {
+  color: #4fc9f0;
+
+  font-weight: 600;
+}
+
+.ghost-code .tok-function {
+  color: #9ad7ff;
+}
+
+.ghost-code .tok-type {
+  color: #c792ea;
+}

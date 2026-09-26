@@ -211,4 +211,10 @@ class OpenAICompatibleProvider(AIProvider):
             }
 
     async def health_check(self):
+        # Metadata-only diagnostics for /health/provider (never
+        # the credential itself).
+        self.last_health_status_code = None
+        self.last_health_error_type = (
+            None if self.api_key else "not-configured"
+        )
         return bool(self.api_key)

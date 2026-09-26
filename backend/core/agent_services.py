@@ -212,6 +212,12 @@ memory_bridge = MemoryBridge(
     audit=audit_log,
 )
 
+# MODEL-stage audit events: the gateway reports every provider
+# call (provider/model/ok/duration/error type — never secrets)
+# into the same single audit store. A raising hook is guarded
+# inside the gateway; auditing can never fail a model call.
+orchestrator.audit_hook = audit_log.append
+
 
 # ============================================================
 # PLANNING + TASK STORE (M4 step 9)

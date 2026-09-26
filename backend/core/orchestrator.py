@@ -21,6 +21,8 @@ while another model/provider can be plugged in later.
 
 from typing import Any, Dict, List, Optional
 
+import time
+
 
 class Orchestrator:
     """
@@ -34,11 +36,51 @@ class Orchestrator:
         self.providers: Dict[str, Any] = {}
         self.default_provider = default_provider
 
+        # Optional callable for MODEL-stage audit events, wired
+        # by the composition root (core.agent_services). Signature:
+        # hook(task_id, stage, event=..., status=..., data=...).
+        # None disables emission; a raising hook must never fail
+        # the model call (guarded at the emit site).
+        self.audit_hook = None
+
         # Future GHOST components
         self.memory = None
         self.retriever = None
         self.tools: Dict[str, Any] = {}
         self.agents: Dict[str, Any] = {}
+
+    def _audit_model_call(
+        self,
+        task_id: Optional[str],
+        provider_name: Optional[str],
+        model: Optional[str],
+        ok: bool,
+        duration_ms: float,
+        error_type: Optional[str],
+    ) -> None:
+        """Emit one safe MODEL audit row. Never raises."""
+
+        if self.audit_hook is None:
+            return
+
+        try:
+            self.audit_hook(
+                task_id,
+                "model",
+                event="provider_call",
+                status="ok" if ok else "failed",
+                data={
+                    "provider": provider_name
+                    or self.default_provider,
+                    "model": model,
+                    "ok": ok,
+                    "duration_ms": round(duration_ms, 1),
+                    "error_type": error_type,
+                },
+            )
+        except Exception:
+            # Audit failure must not fail the model call.
+            return
 
     # ============================================================
     # PROVIDERS / MODEL GATEWAY
@@ -263,6 +305,7 @@ CURRENT USER REQUEST:
         conversation_history: Optional[List[Dict[str, str]]] = None,
         memory_context: Optional[str] = None,
         document_context: Optional[str] = None,
+        task_id: Optional[str] = None,
         **kwargs,
     ) -> str:
         """
@@ -270,6 +313,9 @@ CURRENT USER REQUEST:
 
         The rest of the application should eventually call this
         method rather than talking directly to Nemotron.
+
+        ``task_id`` is optional correlation metadata for the
+        MODEL audit event; it is never forwarded to providers.
         """
 
         provider = self.get_provider(provider_name)
@@ -300,10 +346,34 @@ CURRENT USER REQUEST:
             {"role": "user", "content": context},
         ]
 
-        result = await provider.generate(
-            messages=messages,
-            model=model,
-            **kwargs,
+        call_start = time.perf_counter()
+
+        try:
+            result = await provider.generate(
+                messages=messages,
+                model=model,
+                **kwargs,
+            )
+        except Exception as error:
+            self._audit_model_call(
+                task_id,
+                provider_name,
+                model,
+                ok=False,
+                duration_ms=(
+                    (time.perf_counter() - call_start) * 1000
+                ),
+                error_type=type(error).__name__,
+            )
+            raise
+
+        self._audit_model_call(
+            task_id,
+            provider_name,
+            model,
+            ok=True,
+            duration_ms=(time.perf_counter() - call_start) * 1000,
+            error_type=None,
         )
 
         # --------------------------------------------------------

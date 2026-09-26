@@ -27,6 +27,7 @@ call (same pattern as backend/core/config.py):
 """
 
 import math
+import hashlib
 import os
 import secrets
 import threading
@@ -97,6 +98,17 @@ def get_rate_limits() -> dict:
             DEFAULT_RATE_LIMIT_LOGIN,
         ),
     }
+
+
+def hash_session_token(token: str) -> str:
+    """
+    Stable, non-reversible identity for one session token.
+
+    Task ownership stores this hash — never the raw token — so
+    a database/store read cannot resurrect a usable credential.
+    """
+
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()[:32]
 
 
 def get_auth_password() -> str:

@@ -12,15 +12,31 @@ logger = logging.getLogger(__name__)
 
 class GeminiProvider(AIProvider):
 
+    # Fallback when GEMINI_MODEL is unset. gemini-2.5-flash is
+    # no longer available to new API keys (404), so both call
+    # paths must resolve through _default_model() — never hardcode
+    # a model at a call site.
+    FALLBACK_MODEL = "gemini-3.5-flash"
+
     def __init__(self):
         self.api_key = os.getenv("GEMINI_API_KEY")
         self.base_url = "https://generativelanguage.googleapis.com/v1beta"
+
+    def _default_model(self) -> str:
+        """
+        Single default-model resolver for every Gemini call
+        path (streaming and non-streaming). GEMINI_MODEL is
+        authoritative; the fallback exists only for unset
+        environments.
+        """
+
+        return os.getenv("GEMINI_MODEL", self.FALLBACK_MODEL)
 
     async def generate(self, messages, model=None, **kwargs):
         if not self.api_key:
             raise RuntimeError("GEMINI_API_KEY is not configured")
 
-        model = model or "gemini-2.5-flash"
+        model = model or self._default_model()
 
         contents = []
 
@@ -77,7 +93,7 @@ class GeminiProvider(AIProvider):
         if not self.api_key:
             raise RuntimeError("GEMINI_API_KEY is not configured")
 
-        model = model or os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
+        model = model or self._default_model()
 
         contents = []
         system_parts = []
@@ -165,7 +181,19 @@ class GeminiProvider(AIProvider):
         )
 
     async def health_check(self):
+        """
+        Live reachability probe. Returns a bool (the canonical
+        contract) and records metadata-only diagnostics for
+        /health/provider: the HTTP status code, or the exception
+        type when the request failed before a response. Never
+        stores or exposes the API key.
+        """
+
+        self.last_health_status_code = None
+        self.last_health_error_type = None
+
         if not self.api_key:
+            self.last_health_error_type = "not-configured"
             return False
 
         url = f"{self.base_url}/models"
@@ -177,7 +205,12 @@ class GeminiProvider(AIProvider):
                     params={"key": self.api_key},
                 )
 
+            self.last_health_status_code = response.status_code
+
             return response.is_success
 
-        except Exception:
+        except Exception as error:
+
+            self.last_health_error_type = type(error).__name__
+
             return False

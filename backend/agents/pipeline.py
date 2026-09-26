@@ -126,6 +126,7 @@ class AgentPipeline:
         conversation_history: Optional[List[Dict[str, str]]] = None,
         provider: Optional[str] = None,
         model: Optional[str] = None,
+        owner: Optional[str] = None,
     ) -> PipelineOutcome:
         """
         Plan one user request and, when the plan is ready,
@@ -176,6 +177,7 @@ class AgentPipeline:
             task = self._tasks.create(
                 title or planning.task_title or request_text,
                 description or planning.task_description or request_text,
+                owner=owner,
             )
 
             outcome.task = task
@@ -385,14 +387,20 @@ class AgentPipeline:
                 task,
                 outcome.selection,
             )
+            self._execution_from_skill(outcome)
             return
 
         # Advisory plan: a task exists, nothing is executable.
+        # Report the honest state through the same envelope shape
+        # the runner uses, so the API (and TaskCard) shows a
+        # not-executed task instead of a missing execution.
+        task_status = task.status.value
+
         self._audit(
             task.id,
             AuditStage.RESULT,
             event="nothing_executable",
-            status=task.status.value,
+            status=task_status,
             data={
                 "advisory_steps": (
                 len(outcome.planning.steps)
@@ -405,6 +413,86 @@ class AgentPipeline:
                 ),
             },
         )
+
+        outcome.execution = {
+            "task_id": task.id,
+            "state": "NO_STEPS",
+            "task_status": task_status,
+            "approval_id": None,
+            "reflection": None,
+            "steps": [],
+            "reason": (
+                "no executable steps were planned; the task "
+                "remains pending"
+            ),
+        }
+
+    def _execution_from_skill(
+        self,
+        outcome: PipelineOutcome,
+    ) -> None:
+        """
+        Populate the runner-shaped execution envelope for the
+        skill path, so a skill run is never reported as
+        execution:null.
+
+        Honesty rule: when planning fell back because the model
+        gateway failed (FALLBACK_*), a skill whose "completion"
+        is only an advisory plan must not read as a completed
+        user request. The task stays PENDING and the envelope
+        says NO_STEPS with the reason.
+        """
+
+        result = outcome.skill_result
+
+        if result is None:
+            return
+
+        fallback = (
+            outcome.planning is not None
+            and getattr(
+                outcome.planning.source,
+                "value",
+                str(outcome.planning.source),
+            )
+            in ("FALLBACK_ERROR", "FALLBACK_MALFORMED")
+            and result.status == TaskStatus.COMPLETED
+        )
+
+        if fallback:
+            task = outcome.task
+
+            if task.status == TaskStatus.COMPLETED:
+                task.status = TaskStatus.PENDING
+
+        state = (
+            "COMPLETED"
+            if (
+                result.status == TaskStatus.COMPLETED
+                and not fallback
+            )
+            else "NO_STEPS"
+            if result.status == TaskStatus.COMPLETED
+            else result.status.value
+        )
+
+        outcome.execution = {
+            "task_id": outcome.task.id,
+            "state": state,
+            "task_status": outcome.task.status.value,
+            "approval_id": None,
+            "reflection": None,
+            "steps": [],
+            "skill": result.skill_name,
+            "skill_status": result.status.value,
+            "reason": (
+                "planner fell back to deterministic defaults; "
+                f"skill '{result.skill_name}' produced an "
+                "advisory plan only, so the task remains pending"
+                if fallback
+                else f"skill '{result.skill_name}' executed"
+            ),
+        }
 
     def _run_skill(
         self,

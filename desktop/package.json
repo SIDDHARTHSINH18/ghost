@@ -25,7 +25,13 @@
       },
       {
         "from": "../backend",
-        "to": "backend-project/backend"
+        "to": "backend-project/backend",
+        "filter": [
+          "**/*",
+          "!__pycache__/**",
+          "!**/__pycache__/**",
+          "!data/**"
+        ]
       },
       {
         "from": "../requirements.txt",

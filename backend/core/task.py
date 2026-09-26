@@ -22,6 +22,10 @@ class Task:
     updated_at: datetime = field(default_factory=datetime.now)
     result: str | None = None
     error: str | None = None
+    # Hashed session identity of the authenticated creator.
+    # None = legacy/in-process task (not HTTP-created); such
+    # tasks remain visible to every authenticated session.
+    owner: str | None = None
     # Populated by the post-execution reflection stage. Kept
     # deliberately untyped here so core.task remains independent
     # from the reflection package.

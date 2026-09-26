@@ -3,8 +3,9 @@ import RailNavigator from "./RailNavigator";
 import DrawerSystem from "./DrawerSystem";
 import NodeInspector from "../visualization/NodeInspector";
 import ChatWorkspace from "../chat/ChatWorkspace";
+import authService from "../../services/authService";
 import { formatBytes, formatDateTime, formatScore } from "../../utils/helpers";
-import { API_URL } from "../../utils/constants";
+import { API_URL, CHAT_PROVIDER } from "../../utils/constants";
 
 /**
  * MainLayout - Obsidian-style workspace shell.
@@ -55,27 +56,56 @@ export default function MainLayout({
   onLogout = () => {}
 }) {
   const [providerOnline, setProviderOnline] = useState(false);
-  const [modelName, setModelName] = useState("NVIDIA Nemotron");
+  const [modelName, setModelName] = useState("");
   const [systemStatus, setSystemStatus] = useState("Checking…");
 
   // Live provider status through the existing health endpoint.
   useEffect(() => {
     const fetchProviderStatus = async () => {
       try {
-        const response = await fetch(`${API_URL}/health/provider`, {
-          credentials: "include"
+        const token = authService.getToken();
+        const response = await fetch(`${API_URL}/health/provider?provider=${CHAT_PROVIDER}`, {
+          credentials: "include",
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
         });
         if (response.ok) {
           const data = await response.json();
           setProviderOnline(data.online ?? true);
-          setModelName(data.model || "NVIDIA Nemotron");
-          if (backendOnline && (data.online ?? true)) {
-            setSystemStatus("All systems operational");
+          setModelName(data.model || "");
+
+          const label =
+            (data.provider || "provider").charAt(0).toUpperCase() +
+            (data.provider || "provider").slice(1);
+
+          if ((data.online ?? true) && backendOnline) {
+            setSystemStatus(
+              `${label} — ${data.model} — Connected`
+            );
+          } else if (data.online === false) {
+            // Diagnostic reasons from /health/provider (metadata
+            // only): distinguish quota/availability from outages.
+            if (data.reason === "rate_limited") {
+              setSystemStatus(
+                `${label} — Rate limited — Retrying automatically`
+              );
+            } else if (data.reason === "unavailable") {
+              setSystemStatus(
+                `${label} — Temporarily unavailable — Retrying automatically`
+              );
+            } else {
+              setSystemStatus(
+                `${label} — Connection error — Retrying automatically`
+              );
+            }
           } else if (!backendOnline) {
             setSystemStatus("Backend offline");
           } else {
             setSystemStatus("Provider unreachable");
           }
+        } else if (response.status === 401) {
+          // Session expired/absent: not a provider problem.
+          setProviderOnline(false);
+          setSystemStatus("Sign in to check provider status");
         } else {
           setProviderOnline(false);
           setSystemStatus("Provider unreachable");

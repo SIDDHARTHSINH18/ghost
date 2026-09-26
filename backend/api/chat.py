@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from backend.audit.log import redact_text
 from backend.core.orchestrator import Orchestrator
 from backend.core.security import (
     get_rate_limits,
@@ -15,6 +16,7 @@ from backend.core.services import (
     document_retriever,
     document_summarizer,
     documents,
+    groq_model,
     memory_service,
     nvidia_model,
     orchestrator,
@@ -984,6 +986,10 @@ async def chat(
         chat_model = request.model
     elif provider_name == "nemotron":
         chat_model = nvidia_model
+    elif provider_name == "groq":
+        # Groq has no server-side default model: it must be
+        # explicit on every request.
+        chat_model = groq_model
     else:
         chat_model = None
 
@@ -1768,13 +1774,16 @@ async def chat(
 
         except Exception as error:
 
-            # Log the real error server-side with type
-            # information, but never stream internal
-            # exception text to the client (defect D10 /
-            # threat T5c).
-            logger.exception(
-                "Chat generation failed: %s",
+            # Log the real error server-side, but scrub it
+            # first: provider exception text (and tracebacks)
+            # can carry the request URL with an embedded
+            # API key (e.g. Gemini's "?key=..."). The client
+            # only ever sees the generic failure text below —
+            # never exception content (defect D10 / threat T5c).
+            logger.error(
+                "Chat generation failed: %s: %s",
                 type(error).__name__,
+                redact_text(str(error)),
             )
 
             yield (

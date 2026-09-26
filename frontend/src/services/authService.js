@@ -2,12 +2,17 @@ import apiService from './apiService';
 import { AUTH_TOKEN_KEY } from '../utils/constants';
 
 /**
- * Clear the legacy sessionStorage copy of the token so
- * only one token store (localStorage) remains.
+ * Security boundary: the session token lives ONLY in
+ * sessionStorage — per-tab, never written to disk-backed
+ * localStorage — so a closed ENMA window leaves no reusable
+ * credential behind. The legacy localStorage copy is cleared
+ * on every access.
  */
 function clearLegacyTokenStorage() {
   try {
-    sessionStorage.removeItem(AUTH_TOKEN_KEY);
+    // The token used to live in localStorage; remove any stale
+    // copy without touching the sessionStorage-owned credential.
+    localStorage.removeItem(AUTH_TOKEN_KEY);
   } catch {
     // Best effort.
   }
@@ -22,7 +27,8 @@ const authService = {
    * @returns {boolean} - True if authenticated
    */
   isAuthenticated: () => {
-    const token = localStorage.getItem(AUTH_TOKEN_KEY);
+    const token = sessionStorage.getItem(AUTH_TOKEN_KEY);
+    clearLegacyTokenStorage();
     return !!token && token !== 'null' && token !== 'undefined';
   },
 
@@ -31,7 +37,8 @@ const authService = {
    * @returns {string|null} - Auth token or null
    */
   getToken: () => {
-    return localStorage.getItem(AUTH_TOKEN_KEY);
+    clearLegacyTokenStorage();
+    return sessionStorage.getItem(AUTH_TOKEN_KEY);
   },
 
   /**
@@ -39,7 +46,7 @@ const authService = {
    * @param {string} token - Auth token to store
    */
   setToken: (token) => {
-    localStorage.setItem(AUTH_TOKEN_KEY, token);
+    sessionStorage.setItem(AUTH_TOKEN_KEY, token);
     clearLegacyTokenStorage();
   },
 
@@ -52,7 +59,8 @@ const authService = {
     const response = await apiService.post('/api/auth/login', { password });
     
     if (response.token) {
-      localStorage.setItem(AUTH_TOKEN_KEY, response.token);
+      sessionStorage.setItem(AUTH_TOKEN_KEY, response.token);
+      clearLegacyTokenStorage();
       return response;
     }
     
@@ -63,7 +71,7 @@ const authService = {
    * Logout user and clear token
    */
   logout: () => {
-    localStorage.removeItem(AUTH_TOKEN_KEY);
+    sessionStorage.removeItem(AUTH_TOKEN_KEY);
     clearLegacyTokenStorage();
     // Optionally call logout endpoint
     // apiService.post('/api/logout');
@@ -76,7 +84,8 @@ const authService = {
   refreshToken: async () => {
     const response = await apiService.post('/api/refresh-token');
     if (response.access_token) {
-      localStorage.setItem(AUTH_TOKEN_KEY, response.access_token);
+      sessionStorage.setItem(AUTH_TOKEN_KEY, response.access_token);
+      clearLegacyTokenStorage();
       return response.access_token;
     }
     throw new Error('Token refresh failed');
